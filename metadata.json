@@ -1,0 +1,7 @@
+{
+  "name": "EngenhariaPro SaaS",
+  "description": "A comprehensive multi-tenant SaaS platform for construction management, featuring MS Project-style planning, automatic S-curves, resource histograms, and daily logs.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
