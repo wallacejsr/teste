@@ -272,6 +272,11 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
   // MOTOR DE CRONOGRAMA (RESTAURADO DO BKP)
   // ------------------------------------------
   
+  const isWorkDay = (date: Date): boolean => {
+    const day = date.getDay();
+    return day !== 0 && day !== 6; // 0=domingo, 6=sábado
+  };
+
   const addDays = (dateStr: string, days: number): string => {
     if (!dateStr) return '';
     const d = new Date(dateStr + 'T00:00:00');
@@ -279,13 +284,40 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
     return d.toISOString().split('T')[0];
   };
 
+  const addWorkDays = (dateStr: string, workDays: number): string => {
+    if (!dateStr) return '';
+    let date = new Date(dateStr + 'T00:00:00');
+    let daysAdded = 0;
+    
+    while (daysAdded < workDays) {
+      date.setDate(date.getDate() + 1);
+      if (isWorkDay(date)) {
+        daysAdded++;
+      }
+    }
+    
+    return date.toISOString().split('T')[0];
+  };
+
+  const nextWorkDay = (dateStr: string): string => {
+    if (!dateStr) return '';
+    let date = new Date(dateStr + 'T00:00:00');
+    date.setDate(date.getDate() + 1);
+    
+    while (!isWorkDay(date)) {
+      date.setDate(date.getDate() + 1);
+    }
+    
+    return date.toISOString().split('T')[0];
+  };
+
   const applyCascade = (allTasks: Task[], changedTaskId: string, newEndDate: string): Task[] => {
     let updated = [...allTasks];
     const successors = updated.filter(t => t.dependencias.includes(changedTaskId));
     
     successors.forEach(succ => {
-      const nextStart = addDays(newEndDate, 1);
-      const nextEnd = addDays(nextStart, succ.duracaoDias - 1);
+      const nextStart = nextWorkDay(newEndDate);
+      const nextEnd = addWorkDays(nextStart, succ.duracaoDias - 1);
       
       updated = updated.map(t => 
         t.id === succ.id 
@@ -337,12 +369,12 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
     if (modalTab === 'tarefa' && formData.predecessoraId && !editingTask) {
       const pred = tasks.find(t => t.id === formData.predecessoraId);
       if (pred) {
-        const nextStart = addDays(pred.fimPlanejado, 1);
+        const nextStart = nextWorkDay(pred.fimPlanejado);
         const currentDur = duration || 1;
         setFormData(prev => ({ 
           ...prev, 
           inicio: nextStart, 
-          fim: addDays(nextStart, currentDur - 1) 
+          fim: addWorkDays(nextStart, currentDur - 1) 
         }));
       }
     }
@@ -617,7 +649,7 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
         unidadeId: 'un1', 
         qtdPlanejada: 100, 
         qtdRealizada: 0, 
-        peso: modalTab === 'etapa' ? 0 : formData.peso,
+        peso: modalTab === 'etapa' ? 100 : formData.peso,
         isAutoWeight: modalTab === 'etapa' ? false : formData.isAutoWeight, 
         custoPlanejado: 0, 
         custoRealizado: 0,

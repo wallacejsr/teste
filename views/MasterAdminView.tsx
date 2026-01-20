@@ -100,6 +100,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
     nome: '',
     cnpj: '',
     emailAdmin: '',
+    nomeGestor: '',
     logoUrl: '',
     plano: 'PRO' as PlanTemplate['id'],
     limiteUsuarios: 20,
@@ -146,9 +147,148 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
   const validateStep1 = () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!formData.nome.trim()) return "Informe o nome da organização.";
+    if (!formData.nomeGestor.trim()) return "Informe o nome completo do gestor.";
     if (formData.cnpj.replace(/\D/g, '').length !== 14) return "CNPJ incompleto.";
     if (!emailRegex.test(formData.emailAdmin)) return "E-mail inválido.";
     return null;
+  };
+
+  /* =====================================================
+     GERADOR DE SENHA FORTE COM CRYPTO (SEGURANÇA)
+     ===================================================== */
+  const generateSecurePassword = (): string => {
+    const length = 12;
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    const charsetArray = new Uint8Array(length);
+    
+    try {
+      window.crypto.getRandomValues(charsetArray);
+      let password = '';
+      for (let i = 0; i < length; i++) {
+        password += charset[charsetArray[i] % charset.length];
+      }
+      return password;
+    } catch (error) {
+      console.error('Erro ao gerar senha segura:', error);
+      // Fallback para crypto menos seguro
+      return 'Temp' + Math.random().toString(36).slice(2, 10) + '!@#';
+    }
+  };
+
+  /* =====================================================
+     INTEGRAÇÃO EMAILJS - DISPARO DE BOAS-VINDAS
+     ===================================================== */
+  const sendWelcomeEmail = async (user: User, password: string): Promise<boolean> => {
+    try {
+      const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+      const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
+      const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+
+      if (!serviceId || !templateId || !publicKey) {
+        console.warn('EmailJS não configurado - verifique variáveis de ambiente');
+        return false;
+      }
+
+      // Template HTML elegante para e-mail
+      const emailBodyHTML = `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; padding: 40px 20px;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            
+            <!-- Header com gradiente -->
+            <div style="background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%); padding: 40px 20px; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 28px; font-weight: bold;">🚀 Bem-vindo à Plataforma!</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px;">ENGENHARIAPRO SAAS</p>
+            </div>
+
+            <!-- Conteúdo principal -->
+            <div style="padding: 40px;">
+              <p style="color: #333; font-size: 16px; line-height: 1.6;">Olá <strong>${user.nome}</strong>,</p>
+              <p style="color: #666; font-size: 14px; line-height: 1.8; margin: 20px 0;">
+                Sua conta foi criada com sucesso! Abaixo estão seus dados de acesso para entrar na plataforma. 
+                Por favor, <strong>altere sua senha no primeiro login</strong> por razões de segurança.
+              </p>
+
+              <!-- Bloco de credenciais destacado -->
+              <div style="background-color: #f0f7ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 30px 0; border-radius: 8px;">
+                <p style="color: #1e40af; font-weight: bold; margin: 0 0 15px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">📋 DADOS DE ACESSO</p>
+                <div style="background-color: white; padding: 15px; border-radius: 6px; margin-bottom: 10px;">
+                  <p style="margin: 0 0 8px 0; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #999;">E-mail de Acesso</p>
+                  <p style="margin: 0; color: #333; font-size: 16px; font-weight: bold; font-family: 'Courier New', monospace;">${user.email}</p>
+                </div>
+                <div style="background-color: white; padding: 15px; border-radius: 6px;">
+                  <p style="margin: 0 0 8px 0; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #999;">Senha Temporária</p>
+                  <p style="margin: 0; color: #333; font-size: 16px; font-weight: bold; font-family: 'Courier New', monospace; letter-spacing: 2px;">${password}</p>
+                </div>
+              </div>
+
+              <!-- Instruções de segurança -->
+              <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <p style="color: #856404; margin: 0; font-size: 13px; font-weight: bold;">⚠️ Importante:</p>
+                <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #856404; font-size: 13px;">
+                  <li>Altere sua senha imediatamente após o primeiro login</li>
+                  <li>Nunca compartilhe suas credenciais com terceiros</li>
+                  <li>Use uma senha forte e única</li>
+                </ul>
+              </div>
+
+              <!-- CTA Button -->
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="https://seu-dominio.com/login" style="background-color: #3b82f6; color: white; text-decoration: none; padding: 14px 40px; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 14px;">
+                  Acessar Plataforma
+                </a>
+              </div>
+
+              <!-- Rodapé -->
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+              <p style="color: #999; font-size: 12px; margin: 15px 0 0 0; text-align: center;">
+                Em caso de dúvidas, entre em contato com o suporte: <strong>support@engenhariapro.com.br</strong>
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // ✅ Preparar dados do template - EXATAMENTE como definido no template do EmailJS
+      // Template "Welcome" espera esses campos:
+      const templateParams = {
+        email: user.email,              // ✅ Campo "To Email" do template
+        TO_NAME: user.nome,             // ✅ Campo {{TO_NAME}} no conteúdo
+        TO_EMAIL: user.email,           // ✅ Campo {{TO_EMAIL}} no conteúdo
+        TEMP_PASSWORD: password,        // ✅ Campo {{TEMP_PASSWORD}} no conteúdo
+        APP_NAME: 'ENGENHARIAPRO'       // ✅ Campo {{APP_NAME}} no subject
+      };
+
+      console.log('📧 Enviando e-mail com params:', {
+        service_id: serviceId,
+        template_id: templateId,
+        email: user.email,
+        TO_NAME: user.nome
+      });
+
+      // Usar fetch ou emailjs library (aqui usando fetch para compatibilidade)
+      const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          template_id: templateId,
+          user_id: publicKey,
+          template_params: templateParams
+        })
+      });
+
+      if (response.ok) {
+        console.log('E-mail de boas-vindas enviado com sucesso para:', user.email);
+        return true;
+      } else {
+        console.error('Erro ao enviar e-mail:', response.statusText);
+        return false;
+      }
+    } catch (error) {
+      console.error('Erro crítico ao disparar e-mail de boas-vindas:', error);
+      alert('Falha ao enviar e-mail de boas-vindas. O usuário foi criado, mas notifique-o manualmente sobre as credenciais.');
+      return false;
+    }
   };
 
   const handleNextStep = () => {
@@ -242,10 +382,12 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
 
   const handleEditTenant = (tenant: Tenant) => {
     setEditingTenantId(tenant.id);
+    const adminUser = allUsers.find(u => u.tenantId === tenant.id && u.role === Role.ADMIN);
     setFormData({
       nome: tenant.nome,
       cnpj: tenant.cnpj,
-      emailAdmin: allUsers.find(u => u.tenantId === tenant.id && u.role === Role.ADMIN)?.email || '',
+      emailAdmin: adminUser?.email || '',
+      nomeGestor: adminUser?.nome || '',
       logoUrl: tenant.logoUrl || '',
       plano: tenant.planoId || 'PRO',
       limiteUsuarios: tenant.limiteUsuarios,
@@ -267,7 +409,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
 
   const resetModal = () => {
     setFormData({ 
-      nome: '', cnpj: '', emailAdmin: '', logoUrl: '', plano: 'PRO', 
+      nome: '', cnpj: '', emailAdmin: '', nomeGestor: '', logoUrl: '', plano: 'PRO', 
       limiteUsuarios: 10, limiteObras: 5, 
       limiteMaoDeObra: 50, limiteMaquinario: 20, limiteCargos: 15,
       vencimento: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0] 
@@ -276,7 +418,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
     setEditingTenantId(null);
   };
 
-  const handleSaveTenant = () => {
+  const handleSaveTenant = async () => {
     const error = validateStep1();
     if (error) { alert(error); return; }
     const tenantId = editingTenantId || `tnt-${Date.now()}`;
@@ -294,14 +436,56 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       dataFimLicenca: formData.vencimento, 
       status: LicenseStatus.ATIVA 
     };
-    if (editingTenantId) onUpdateTenants(allTenants.map(t => t.id === editingTenantId ? newTenant : t));
-    else {
-      const newUser: User = { id: `user-${Date.now()}`, nome: `ADMIN ${formData.nome.toUpperCase()}`, email: formData.emailAdmin.toLowerCase().trim(), tenantId: tenantId, role: Role.ADMIN, ativo: true, cargo: 'Administrador Master' };
+    if (editingTenantId) {
+      onUpdateTenants(allTenants.map(t => t.id === editingTenantId ? newTenant : t));
+      
+      // ✅ ATUALIZAR NOME DO GESTOR TAMBÉM
+      const adminUser = allUsers.find(u => u.tenantId === editingTenantId && u.role === Role.ADMIN);
+      if (adminUser) {
+        onUpdateUsers(allUsers.map(u => 
+          u.id === adminUser.id 
+            ? { ...u, nome: formData.nomeGestor.toUpperCase().trim() }
+            : u
+        ));
+      }
+      
+      setToastMessage("Organização atualizada com sucesso!");
+    } else {
+      // ✅ CRIAR NOVO USUÁRIO ADMIN COM SENHA GERADA
+      const tempPassword = generateSecurePassword();
+      const newUser: User = { 
+        id: `user-${Date.now()}`, 
+        nome: formData.nomeGestor.toUpperCase().trim(),
+        email: formData.emailAdmin.toLowerCase().trim(), 
+        tenantId: tenantId, 
+        role: Role.ADMIN, 
+        ativo: true, 
+        cargo: 'Administrador Master',
+        password: tempPassword,  // ✅ NOVO: Armazenar senha
+        lastPasswordChange: new Date().toISOString()  // ✅ NOVO: Data de criação
+      };
+      
+      // Atualizar estado
       onUpdateTenants([...allTenants, newTenant]);
       onUpdateUsers([...allUsers, newUser]);
+      
+      // ✅ DISPARAR E-MAIL DE BOAS-VINDAS
+      try {
+        const emailSent = await sendWelcomeEmail(newUser, tempPassword);
+        if (emailSent) {
+          setToastMessage(`✅ Organização criada! E-mail enviado para ${formData.emailAdmin}`);
+        } else {
+          setToastMessage(`⚠️ Organização criada, mas e-mail não foi enviado. Notifique manualmente: ${tempPassword}`);
+        }
+      } catch (error) {
+        console.error('Erro ao enviar e-mail:', error);
+        setToastMessage(`⚠️ Organização criada. E-mail falhou: ${tempPassword}`);
+      }
     }
-    setToastMessage("Organização processada com sucesso!");
-    setShowSuccessToast(true); setShowAddModal(false); resetModal();
+    
+    setShowSuccessToast(true); 
+    setShowAddModal(false); 
+    resetModal();
   };
 
   const updatePlanField = (planId: string, field: keyof PlanTemplate, value: any) => {
@@ -815,6 +999,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
                     <div className="space-y-4">
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Fantasia da Organização</label><input type="text" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} placeholder="Ex: Construtora Horizon" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-black uppercase outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">CNPJ Fiscal</label><input type="text" value={formData.cnpj} onChange={handleCNPJChange} placeholder="00.000.000/0000-00" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
+                      <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Completo do Gestor</label><input type="text" value={formData.nomeGestor} onChange={e => setFormData({...formData, nomeGestor: e.target.value})} placeholder="Ex: João Silva Santos" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-black uppercase outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">E-mail Administrativo Master</label><input type="email" value={formData.emailAdmin} onChange={e => setFormData({...formData, emailAdmin: e.target.value})} placeholder="admin@empresa.com" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                     </div>
                   </motion.div>

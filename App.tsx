@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import Dashboard from './views/Dashboard';
 import ObrasView from './views/ObrasView';
 import PlanejamentoView from './views/PlanejamentoView';
+import GanttChartView from './views/GanttChartView';
 import FinanceiroView from './views/FinanceiroView';
 import RecursosView from './views/RecursosView';
 import DiarioView from './views/DiarioView';
@@ -140,23 +141,54 @@ const App: React.FC = () => {
     localStorage.setItem('ep_plans_config', JSON.stringify(plansConfig));
   }, [projects, tasks, resources, dailyLogs, selectedProject, activeTab, tenants, allUsers, currentUser, globalConfig, isLoggedIn, plansConfig]);
 
-  const handleLogin = (email: string) => {
+  /* =====================================================
+     AUTENTICAÇÃO COM VALIDAÇÃO DE SENHA (PRODUÇÃO)
+     ===================================================== */
+  const handleLogin = (email: string, password: string = '') => {
     const normalizedEmail = email.toLowerCase().trim();
+    
+    // Master admin com acesso especial
     if (normalizedEmail === 'master@plataforma.com') {
-      setCurrentUser({ id: 'master', nome: 'Super Administrador', email: 'master@plataforma.com', tenantId: 'master', role: Role.SUPERADMIN, ativo: true, cargo: 'Plataforma Owner' });
+      setCurrentUser({ 
+        id: 'master', 
+        nome: 'Super Administrador', 
+        email: 'master@plataforma.com', 
+        tenantId: 'master', 
+        role: Role.SUPERADMIN, 
+        ativo: true, 
+        cargo: 'Plataforma Owner' 
+      });
       setActiveTab('master-dash');
       setIsLoggedIn(true);
       return;
-    } 
-    const userFound = allUsers.find(u => u.email.toLowerCase().trim() === normalizedEmail);
-    if (userFound) {
-      if (!userFound.ativo) { alert('Este usuário está inativo.'); return; }
-      setCurrentUser(userFound);
-      setActiveTab('dashboard');
-      setIsLoggedIn(true);
-    } else {
-      alert('E-mail não cadastrado na plataforma.');
     }
+    
+    // Buscar usuário
+    const userFound = allUsers.find(u => u.email.toLowerCase().trim() === normalizedEmail);
+    if (!userFound) {
+      alert('E-mail não cadastrado na plataforma.');
+      return;
+    }
+    
+    // Validar ativo
+    if (!userFound.ativo) {
+      alert('Este usuário está inativo. Contacte o administrador.');
+      return;
+    }
+    
+    // Validação de senha (em produção, comparar com hash)
+    if (userFound.password && password !== userFound.password) {
+      alert('Senha incorreta.');
+      return;
+    }
+    
+    // Sucesso - NUNCA armazenar senha em localStorage
+    const userToStore = { ...userFound };
+    delete userToStore.password; // Remove senha antes de armazenar
+    
+    setCurrentUser(userToStore);
+    setActiveTab('dashboard');
+    setIsLoggedIn(true);
   };
 
   const handleLogout = () => {
@@ -231,6 +263,16 @@ const App: React.FC = () => {
           dailyLogs={tenantLogs} 
         /> 
       ) : renderObrasView();
+      case 'gantt': return (
+        <GanttChartView 
+          projects={tenantProjects}
+          tasks={tenantTasks}
+          resources={tenantResources}
+          dailyLogs={tenantLogs}
+          tenant={activeTenant}
+          onTasksChange={(updatedTasks) => { const otherTenantsTasks = tasks.filter(t => t.tenantId !== currentUser.tenantId); const sanitized = updatedTasks.map(t => ({ ...t, tenantId: currentUser.tenantId })); setTasks([...otherTenantsTasks, ...sanitized]); }}
+        />
+      );
       case 'financeiro': return selectedProject ? ( 
         <FinanceiroView 
           projects={tenantProjects} 

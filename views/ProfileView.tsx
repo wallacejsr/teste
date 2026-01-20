@@ -19,9 +19,11 @@ import {
   Activity,
   CheckCircle2,
   Calendar,
-  Lock
+  Lock,
+  Check,
+  AlertCircle
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProfileViewProps {
   user: User;
@@ -46,8 +48,14 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   globalConfig,
   onUpdateGlobalConfig
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'perfil' | 'empresa' | 'equipe' | 'branding'>('perfil');
+  const [activeSubTab, setActiveSubTab] = useState<'perfil' | 'empresa' | 'equipe' | 'seguranca' | 'branding'>('perfil');
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
   const sigInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const sysLogoInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +106,73 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     reader.readAsDataURL(file);
   };
 
+  /* =====================================================
+     GESTÃO DE CREDENCIAIS - TROCA DE SENHA SEGURA
+     ===================================================== */
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    
+    // Validações
+    if (!currentPassword.trim()) {
+      setPasswordError('Informe sua senha atual para validação.');
+      return;
+    }
+    
+    if (user.password && currentPassword !== user.password) {
+      setPasswordError('Senha atual incorreta.');
+      return;
+    }
+    
+    if (!newPassword.trim()) {
+      setPasswordError('Informe uma nova senha.');
+      return;
+    }
+    
+    if (newPassword.length < 6) {
+      setPasswordError('A nova senha deve ter no mínimo 6 caracteres.');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setPasswordError('As senhas não coincidem.');
+      return;
+    }
+    
+    if (newPassword === currentPassword) {
+      setPasswordError('A nova senha não pode ser igual à atual.');
+      return;
+    }
+    
+    try {
+      setPasswordLoading(true);
+      
+      // Simular delay de processamento
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Atualizar usuário com nova senha
+      const updatedUser = {
+        ...user,
+        password: newPassword,
+        lastPasswordChange: new Date().toISOString()
+      };
+      
+      onUpdateUser(updatedUser);
+      
+      // Resetar formulário
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowPasswordModal(false);
+      
+      alert('Senha alterada com sucesso! ✅');
+    } catch (error) {
+      console.error('Erro ao alterar senha:', error);
+      setPasswordError('Erro ao processar a alteração. Tente novamente.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const rolesToInvite = Object.values(Role).filter(r => isSuperAdmin ? true : r !== Role.SUPERADMIN);
 
   return (
@@ -145,6 +220,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                 <span className="text-[11px] font-black uppercase tracking-widest">Minha Equipe</span>
               </div>
               <ChevronRight size={14} className={activeSubTab === 'equipe' ? 'opacity-100' : 'opacity-0'} />
+            </button>
+
+            <button 
+              onClick={() => setActiveSubTab('seguranca')}
+              className={`w-full flex items-center justify-between p-4 rounded-[20px] transition-all group ${activeSubTab === 'seguranca' ? 'bg-white shadow-2xl' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              style={{ color: activeSubTab === 'seguranca' ? primaryColor : undefined }}
+            >
+              <div className="flex items-center gap-4">
+                <Shield size={18} />
+                <span className="text-[11px] font-black uppercase tracking-widest">Segurança</span>
+              </div>
+              <ChevronRight size={14} className={activeSubTab === 'seguranca' ? 'opacity-100' : 'opacity-0'} />
             </button>
           </>
         )}
@@ -355,6 +442,233 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                 </tbody>
               </table>
             </div>
+          </motion.div>
+        )}
+
+        {activeSubTab === 'seguranca' && isAdmin && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-xl">
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.3em] mb-8 flex items-center gap-3">
+              <Shield size={18} className="text-amber-500" /> Segurança da Conta
+            </h3>
+
+            <div className="space-y-8">
+              {/* Card de Status de Segurança */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-6 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2">Última Alteração de Senha</p>
+                      <p className="text-sm font-black text-emerald-800">
+                        {user.lastPasswordChange 
+                          ? new Date(user.lastPasswordChange).toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' })
+                          : 'Nunca alterada'
+                        }
+                      </p>
+                    </div>
+                    <CheckCircle2 size={20} className="text-emerald-600" />
+                  </div>
+                </div>
+
+                <div className="p-6 bg-blue-50 border border-blue-100 rounded-2xl">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-2">Conta Ativa</p>
+                      <p className="text-sm font-black text-blue-800">
+                        {user.ativo ? '✅ Ativa' : '🔒 Desativada'}
+                      </p>
+                    </div>
+                    <CheckCircle2 size={20} className="text-blue-600" />
+                  </div>
+                </div>
+
+                <div className="p-6 bg-purple-50 border border-purple-100 rounded-2xl">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-2">Nível de Acesso</p>
+                      <p className="text-sm font-black text-purple-800 capitalize">
+                        {user.role.toLowerCase()}
+                      </p>
+                    </div>
+                    <Lock size={20} className="text-purple-600" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Divisor */}
+              <hr className="border-slate-100" />
+
+              {/* Seção de Troca de Senha */}
+              <div>
+                <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-3">
+                  <Lock size={16} className="text-amber-500" /> Alterar Senha
+                </h4>
+
+                <div className="p-6 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl">
+                  <p className="text-xs font-bold text-slate-600 mb-6 leading-relaxed">
+                    Por segurança, recomendamos alterar sua senha periodicamente. Escolha uma senha forte com números, letras maiúsculas/minúsculas e símbolos.
+                  </p>
+
+                  <button
+                    onClick={() => setShowPasswordModal(true)}
+                    className="flex items-center gap-2 px-6 py-3.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all active:scale-95 hover:brightness-110"
+                  >
+                    <Lock size={16} /> Alterar Senha Agora
+                  </button>
+                </div>
+              </div>
+
+              {/* Recomendações de Segurança */}
+              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-3">
+                  <Activity size={16} className="text-blue-500" /> Dicas de Segurança
+                </h4>
+                <ul className="space-y-3 text-xs font-bold text-slate-600">
+                  <li className="flex gap-3">
+                    <span className="text-blue-500 font-black">✓</span> Nunca compartilhe sua senha com colegas ou suporte
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-blue-500 font-black">✓</span> Use uma senha única e diferente de outras plataformas
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-blue-500 font-black">✓</span> Altere sua senha a cada 90 dias
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-blue-500 font-black">✓</span> Não use informações pessoais (datas, nomes, etc)
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="text-blue-500 font-black">✓</span> Realize logout ao usar computadores compartilhados
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Modal de Troca de Senha */}
+            <AnimatePresence>
+              {showPasswordModal && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => !passwordLoading && setShowPasswordModal(false)}
+                  className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+                >
+                  <motion.div
+                    initial={{ scale: 0.9, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.9, y: 20 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden"
+                  >
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-8 py-6 flex items-center justify-between">
+                      <h3 className="text-white font-black text-sm uppercase tracking-widest flex items-center gap-2">
+                        <Lock size={18} /> Alterar Senha
+                      </h3>
+                      <button
+                        onClick={() => setShowPasswordModal(false)}
+                        className="text-white/80 hover:text-white transition-colors"
+                        disabled={passwordLoading}
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+
+                    {/* Conteúdo */}
+                    <div className="p-8 space-y-6">
+                      {/* Erro */}
+                      {passwordError && (
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+                          <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+                          <p className="text-xs font-bold text-red-800">{passwordError}</p>
+                        </div>
+                      )}
+
+                      {/* Senha Atual */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1 flex items-center gap-2">
+                          <Lock size={14} /> Senha Atual
+                        </label>
+                        <input
+                          type="password"
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          placeholder="Digite sua senha atual"
+                          disabled={passwordLoading}
+                          className="w-full bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-100 transition-all disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                      </div>
+
+                      {/* Divider */}
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-slate-200"></div>
+                        </div>
+                        <div className="relative flex justify-center text-xs">
+                          <span className="px-2 bg-white text-slate-500 font-black">NOVA SENHA</span>
+                        </div>
+                      </div>
+
+                      {/* Nova Senha */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1 flex items-center gap-2">
+                          <Lock size={14} /> Nova Senha
+                        </label>
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Mín. 6 caracteres"
+                          disabled={passwordLoading}
+                          className="w-full bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-100 transition-all disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                      </div>
+
+                      {/* Confirmar Senha */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1 flex items-center gap-2">
+                          <Check size={14} /> Confirmar Nova Senha
+                        </label>
+                        <input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="Repita a nova senha"
+                          disabled={passwordLoading}
+                          className="w-full bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-100 transition-all disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-8 py-5 border-t border-slate-100 flex items-center gap-3 justify-end">
+                      <button
+                        onClick={() => setShowPasswordModal(false)}
+                        disabled={passwordLoading}
+                        className="px-6 py-2.5 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:text-slate-800 transition-colors disabled:text-slate-400"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleChangePassword}
+                        disabled={passwordLoading}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {passwordLoading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Processando...
+                          </>
+                        ) : (
+                          <>
+                            <Check size={16} /> Confirmar Alteração
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
 

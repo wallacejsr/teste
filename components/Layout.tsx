@@ -3,6 +3,7 @@ import {
   LayoutDashboard, 
   HardHat, 
   CalendarDays, 
+  TrendingUp,
   LineChart, 
   BarChart3, 
   BookOpen, 
@@ -65,6 +66,12 @@ const Layout: React.FC<LayoutProps> = ({
       id: 'planejamento', 
       label: 'Cronograma', 
       icon: CalendarDays, 
+      requiredFeature: 'Cronograma Básico' 
+    },
+    { 
+      id: 'gantt', 
+      label: 'Gantt (CPM)', 
+      icon: TrendingUp, 
       requiredFeature: 'Cronograma Básico' 
     },
     { 
@@ -141,7 +148,7 @@ const Layout: React.FC<LayoutProps> = ({
           
           {isSidebarExpanded && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="truncate min-w-0 flex-1">
-              <span className="font-black text-xl tracking-tighter bg-gradient-to-r from-blue-300 to-indigo-300 bg-clip-text text-transparent uppercase leading-none block truncate">
+              <span className="font-black text-sm tracking-tighter bg-gradient-to-r from-blue-300 to-indigo-300 bg-clip-text text-transparent uppercase leading-none block truncate">
                 {globalConfig.softwareName}
               </span>
               <p className="text-[9px] font-black text-white/30 tracking-[0.2em] uppercase mt-1 truncate">

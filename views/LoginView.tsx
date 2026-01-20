@@ -5,7 +5,7 @@ import { Zap, Lock, Mail, ChevronRight, Info } from 'lucide-react';
 import { GlobalConfig } from '../types';
 
 interface LoginViewProps {
-  onLogin: (email: string) => void;
+  onLogin: (email: string, password: string) => void;
   globalConfig: GlobalConfig;
 }
 
@@ -16,7 +16,11 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin(email);
+    if (!email.trim()) {
+      alert('Informe seu e-mail corporativo.');
+      return;
+    }
+    onLogin(email, password);
   };
 
   return (

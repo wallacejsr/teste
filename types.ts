@@ -91,6 +91,8 @@ export interface User {
   cargo?: string;
   signatureUrl?: string;
   avatarUrl?: string;
+  password?: string;
+  lastPasswordChange?: string;
 }
 
 export interface Unit {
