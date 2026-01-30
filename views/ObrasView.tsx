@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Project, ProjectStatus, Tenant } from '../types';
 import { 
   MoreHorizontal, 
@@ -16,9 +17,14 @@ import {
   CheckCircle2, 
   ChevronRight, 
   ChevronLeft,
-  Lock
+  Lock,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ProtectedElement } from '../hooks/usePermission';
+import { Resource, Action } from '../types/permissions';
+import ImageUploader from '../components/ImageUploader';
+import ImagePreviewModal from '../components/ImagePreviewModal';
 
 interface ObrasViewProps {
   projects: Project[];
@@ -34,7 +40,8 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewLogoOpen, setPreviewLogoOpen] = useState(false);
+  const [selectedLogoUrl, setSelectedLogoUrl] = useState<string>('');
   
   const [formData, setFormData] = useState({
     nome: '',
@@ -54,17 +61,14 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const handleLogoClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    fileInputRef.current?.click();
+  const handleLogoUpload = (url: string) => {
+    // Callback do ImageUploader quando upload completa
+    setFormData(prev => ({ ...prev, logoUrl: url }));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setFormData(prev => ({ ...prev, logoUrl: url }));
-    }
+  const handlePreviewLogo = (logoUrl: string) => {
+    setSelectedLogoUrl(logoUrl);
+    setPreviewLogoOpen(true);
   };
 
   const openEditModal = (e: React.MouseEvent, project: Project) => {
@@ -97,7 +101,7 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
   const handleNextStep = () => {
     if (currentStep === 1) {
       if (!formData.nome || !formData.local || !formData.orcamento) {
-        alert("Preencha os campos obrigatórios da Identidade.");
+        toast.error('Preencha os campos obrigatórios da Identidade.');
         return;
       }
       setCurrentStep(2);
@@ -106,7 +110,7 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
 
   const handleSave = () => {
     if (!formData.inicio || !formData.fim) {
-      alert("Defina as datas de cronograma.");
+      toast.error('Defina as datas de cronograma.');
       return;
     }
 
@@ -123,7 +127,10 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
       baselineSet: editingProject ? editingProject.baselineSet : false
     };
 
-    onAddProject(projectData); 
+    console.log('[ObrasView] Saving project:', projectData);
+    onAddProject(projectData);
+    console.log('[ObrasView] Project added to state. Closing modal and syncing to Supabase...');
+    
     setShowAddModal(false);
     setEditingProject(null);
     setCurrentStep(1);
@@ -158,13 +165,15 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
             <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-lg text-[9px] font-black uppercase">{projects.length}/{activeTenant.limiteObras} Em uso</span>
           </div>
         </div>
-        <button 
-          onClick={handleAddNewClick}
-          className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold shadow-lg transition-all active:scale-95 ${isLimitReached ? 'bg-amber-500 text-white shadow-amber-100' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}
-        >
-          {isLimitReached ? <Lock size={20} /> : <Plus size={20} />} 
-          {isLimitReached ? 'Aumentar Limite (Upgrade)' : 'Cadastrar Nova Obra'}
-        </button>
+        <ProtectedElement resource={Resource.PROJECTS} action={Action.CREATE}>
+          <button 
+            onClick={handleAddNewClick}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold shadow-lg transition-all active:scale-95 ${isLimitReached ? 'bg-amber-500 text-white shadow-amber-100' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}
+          >
+            {isLimitReached ? <Lock size={20} /> : <Plus size={20} />} 
+            {isLimitReached ? 'Aumentar Limite (Upgrade)' : 'Cadastrar Nova Obra'}
+          </button>
+        </ProtectedElement>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -180,6 +189,21 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
                  alt={project.nome} 
                />
+               
+               {/* Preview Button */}
+               {project.logoUrl && (
+                 <button
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     handlePreviewLogo(project.logoUrl!);
+                   }}
+                   className="absolute top-4 left-4 p-2 bg-white/90 backdrop-blur-sm text-blue-600 rounded-xl opacity-0 group-hover:opacity-100 transition-all shadow-lg hover:bg-white"
+                   title="Visualizar logo"
+                 >
+                   <Eye size={16} />
+                 </button>
+               )}
+
                <div className="absolute top-4 right-4">
                   <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-[0.1em] shadow-sm ${
                     project.status === ProjectStatus.EXECUCAO ? 'bg-emerald-50 text-white' : 'bg-blue-600 text-white'
@@ -214,18 +238,22 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
                       className="absolute right-0 top-full mt-2 w-40 bg-white border border-slate-100 rounded-2xl shadow-2xl z-20 py-1.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button 
-                        onClick={(e) => openEditModal(e, project)}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[11px] font-black text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-wider"
-                      >
-                        <Edit2 size={14} className="text-blue-500" /> Editar
-                      </button>
-                      <button 
-                        onClick={(e) => handleDelete(e, project.id)}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[11px] font-black text-red-500 hover:bg-red-50 transition-colors uppercase tracking-wider"
-                      >
-                        <Trash2 size={14} /> Excluir
-                      </button>
+                      <ProtectedElement resource={Resource.PROJECTS} action={Action.UPDATE}>
+                        <button 
+                          onClick={(e) => openEditModal(e, project)}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-[11px] font-black text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-wider"
+                        >
+                          <Edit2 size={14} className="text-blue-500" /> Editar
+                        </button>
+                      </ProtectedElement>
+                      <ProtectedElement resource={Resource.PROJECTS} action={Action.DELETE}>
+                        <button 
+                          onClick={(e) => handleDelete(e, project.id)}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-[11px] font-black text-red-500 hover:bg-red-50 transition-colors uppercase tracking-wider"
+                        >
+                          <Trash2 size={14} /> Excluir
+                        </button>
+                      </ProtectedElement>
                     </div>
                   )}
                 </div>
@@ -303,20 +331,35 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
                     <div className="grid grid-cols-2 gap-6">
                        <div className="col-span-2">
                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 mb-2 block">Logo da Obra / Cliente</label>
-                          <div 
-                            onClick={handleLogoClick}
-                            className="w-full h-32 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-all overflow-hidden group shadow-inner"
-                          >
-                            {formData.logoUrl ? (
-                              <img src={formData.logoUrl} className="w-full h-full object-cover block" alt="Logo" />
-                            ) : (
-                              <div className="flex flex-col items-center">
-                                <ImageIcon size={24} className="text-slate-300 group-hover:text-blue-500 mb-2" />
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Upload de Imagem</span>
-                              </div>
-                            )}
-                            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
-                          </div>
+                          
+                          {/* Preview do Logo Atual */}
+                          {formData.logoUrl && (
+                            <div className="mb-4 relative group">
+                              <img 
+                                src={formData.logoUrl} 
+                                alt="Logo atual"
+                                className="w-full h-32 object-cover rounded-2xl border border-slate-200 cursor-pointer"
+                                onClick={() => handlePreviewLogo(formData.logoUrl)}
+                              />
+                              <button
+                                onClick={() => handlePreviewLogo(formData.logoUrl)}
+                                className="absolute top-2 right-2 p-2 bg-blue-500 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all"
+                                title="Visualizar logo"
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </div>
+                          )}
+
+                          {/* ImageUploader Component */}
+                          <ImageUploader
+                            entityId={editingProject?.id || 'temp'}
+                            tenantId={activeTenant.id}
+                            bucket="fotos-obra"
+                            label="Upload de Logo (WebP otimizado)"
+                            onUploadSuccess={handleLogoUpload}
+                            maxSizeMB={5}
+                          />
                        </div>
 
                        <div className="col-span-2 space-y-1">
@@ -437,18 +480,28 @@ const ObrasView: React.FC<ObrasViewProps> = ({ projects, activeTenant, onOpenUpg
                    >
                     <ChevronLeft size={14} /> Voltar
                    </button>
-                   <button 
-                    onClick={handleSave} 
-                    className="flex-1 ml-8 bg-blue-600 text-white px-8 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 active:scale-95"
-                   >
-                    <CheckCircle2 size={16} /> {editingProject ? 'Salvar Alterações' : 'Cadastrar Obra'}
-                   </button>
+                   <ProtectedElement resource={Resource.PROJECTS} action={editingProject ? Action.UPDATE : Action.CREATE}>
+                     <button 
+                      onClick={handleSave} 
+                      className="flex-1 ml-8 bg-blue-600 text-white px-8 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 active:scale-95"
+                     >
+                      <CheckCircle2 size={16} /> {editingProject ? 'Salvar Alterações' : 'Cadastrar Obra'}
+                     </button>
+                   </ProtectedElement>
                  </>
                )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Preview Modal */}
+      <ImagePreviewModal
+        isOpen={previewLogoOpen}
+        images={selectedLogoUrl ? [selectedLogoUrl] : []}
+        title="Logo da Obra"
+        onClose={() => setPreviewLogoOpen(false)}
+      />
     </div>
   );
 };

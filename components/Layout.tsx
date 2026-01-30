@@ -19,10 +19,13 @@ import {
   CreditCard,
   Palette,
   Lock,
-  Wallet
+  Wallet,
+  Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlobalConfig, Tenant, User, Role } from '../types';
+import { usePermission } from '../hooks/usePermission';
+import { Resource as PermissionResource, Action } from '../types/permissions';
 
 // Interface de menu atualizada para suportar checagem dinâmica de recursos
 interface MenuItem {
@@ -43,6 +46,8 @@ interface LayoutProps {
   globalConfig: GlobalConfig;
   onLogout: () => void;
   onOpenUpgrade: () => void;
+  syncStatus?: 'online' | 'offline' | 'syncing';
+  queueSize?: number;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -54,9 +59,13 @@ const Layout: React.FC<LayoutProps> = ({
   planFeatures, 
   globalConfig, 
   onLogout, 
-  onOpenUpgrade 
+  onOpenUpgrade,
+  syncStatus = 'offline',
+  queueSize = 0 
 }) => {
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+  const { allowed: canViewSettings } = usePermission(PermissionResource.SETTINGS, Action.READ);
+  const { allowed: canManageTenants } = usePermission(PermissionResource.TENANTS, Action.MANAGE);
 
   // Mapeamento dos Menus aos Recursos configuráveis no Master Admin
   const clientMenuItems: MenuItem[] = [
@@ -97,10 +106,25 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'subscriptions', label: 'Licenciamento', icon: CreditCard },
     { id: 'payments', label: 'Pagamentos', icon: Wallet },
     { id: 'system-branding', label: 'Config. White-label', icon: Palette },
+    { id: 'audit', label: 'Auditoria', icon: Shield },
     { id: 'config', label: 'Meu Perfil', icon: Settings },
   ];
 
-  const menuItems = user.role === Role.SUPERADMIN ? masterMenuItems : clientMenuItems;
+  const filteredClientMenuItems = clientMenuItems.filter((item) => {
+    if (item.id === 'config' && !canViewSettings) return false;
+    return true;
+  });
+
+  const filteredMasterMenuItems = masterMenuItems.filter((item) => {
+    // Auditoria só para SUPERADMIN
+    if (item.id === 'audit' && user.role !== Role.SUPERADMIN) return false;
+    if (item.id === 'config' && !canViewSettings) return false;
+    return true;
+  });
+
+  const menuItems = user.role === Role.SUPERADMIN
+    ? (canManageTenants ? filteredMasterMenuItems : [])
+    : filteredClientMenuItems;
   const primaryColor = globalConfig.primaryColor || '#3b82f6';
 
   // Lógica de clique atualizada para consultar a lista de recursos (planFeatures)
@@ -152,7 +176,7 @@ const Layout: React.FC<LayoutProps> = ({
                 {globalConfig.softwareName}
               </span>
               <p className="text-[9px] font-black text-white/30 tracking-[0.2em] uppercase mt-1 truncate">
-                {user.role === Role.SUPERADMIN ? 'Master Console' : 'Engineering Suite'}
+                {user.role === Role.SUPERADMIN ? 'Master Console' : globalConfig.softwareSubtitle || 'Engineering Suite'}
               </p>
             </motion.div>
           )}
@@ -223,10 +247,32 @@ const Layout: React.FC<LayoutProps> = ({
           </div>
           
           <div className="flex items-center gap-6">
-            <div className="text-right flex flex-col hidden sm:flex">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Empresa</span>
-              <span className="text-sm font-black text-slate-900 uppercase tracking-tighter truncate max-w-[150px]">{user.role === Role.SUPERADMIN ? 'ADMIN MASTER' : tenant.nome}</span>
-            </div>
+            {user.role !== Role.SUPERADMIN && (
+              <div className="text-right flex flex-col hidden sm:flex">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Empresa</span>
+                <span className="text-sm font-black text-slate-900 uppercase tracking-tighter truncate max-w-[150px]">
+                  {tenant?.nome || 'Empresa não identificada'}
+                </span>
+                {/* Status de Conexão */}
+                <div className="flex items-center gap-1.5 mt-1.5 justify-end">
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    syncStatus === 'online' ? 'bg-green-500' : 
+                    syncStatus === 'offline' ? 'bg-gray-400' : 
+                    'bg-blue-500 animate-pulse'
+                  }`}></div>
+                  <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                    syncStatus === 'online' ? 'text-green-600' : 
+                    syncStatus === 'offline' ? 'text-gray-500' : 
+                    'text-blue-600'
+                  }`}>
+                    {syncStatus === 'online' && 'Online'}
+                    {syncStatus === 'offline' && 'Offline'}
+                    {syncStatus === 'syncing' && 'Sincronizando'}
+                    {queueSize > 0 && ` (${queueSize})`}
+                  </span>
+                </div>
+              </div>
+            )}
             
             <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-xl flex items-center justify-center overflow-hidden shrink-0 aspect-square">
                {user.role === Role.SUPERADMIN ? (

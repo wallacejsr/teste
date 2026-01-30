@@ -106,13 +106,23 @@ export interface Resource {
   nome: string;
   tipo: 'HUMANO' | 'EQUIPAMENTO';
   tenantId: string;
-  custoHora: number;
+  custoHora?: number;
+  custoHoraFormatted?: string;
   especialidade?: string;
   placaId?: string;
   categoria?: string;
   userId?: string;
   cargoId?: string;
   cargoNome?: string;
+  ativo?: boolean;
+}
+
+export interface RoleDefinition {
+  id: string;
+  tenantId?: string;
+  nome: string;
+  hhPadrao: number;
+  categoria: string;
 }
 
 export interface Task {
@@ -120,6 +130,7 @@ export interface Task {
   tenantId: string;
   obraId: string;
   nome: string;
+  descricao?: string;
   wbs: string;
   duracaoDias: number;
   inicioPlanejado: string;
@@ -128,6 +139,7 @@ export interface Task {
   fimReal?: string;
   dependencias: string[];
   unidadeId: string;
+  unidadeMedida?: string;
   qtdPlanejada: number;
   qtdRealizada: number;
   peso: number;
@@ -144,6 +156,8 @@ export interface Project {
   id: string;
   tenantId: string;
   nome: string;
+  descricao?: string;
+  clienteNome?: string;
   local: string;
   status: ProjectStatus;
   dataInicio: string;

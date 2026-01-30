@@ -1,6 +1,7 @@
 
 // Fix: Added explicit React import to avoid UMD global errors
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { 
   Globe, 
   Building2, 
@@ -55,6 +56,10 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlobalConfig, Tenant, LicenseStatus, User, Role, PlanTemplate, Project, DailyLog } from '../types';
+import { ProtectedElement } from '../hooks/usePermission';
+import { Resource as PermissionResource, Action } from '../types/permissions';
+import { dataSyncService } from '../services/dataService';
+import { toast } from 'sonner';
 
 interface MasterAdminViewProps {
   activeTab: string;
@@ -85,6 +90,8 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
   onUpdatePlansConfig,
   onSimulateAccess
 }) => {
+  const getUserTenantId = (u: User | any) => (u as any).tenantId ?? (u as any).tenant_id;
+  const isAdminUser = (u: User | any) => String((u as any).role || '').toUpperCase() === Role.ADMIN;
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'suspended' | 'expiring'>('all');
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
@@ -96,18 +103,37 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
   const [currentStep, setCurrentStep] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const loadUsersIfNeeded = async () => {
+      if (activeTab !== 'master-dash' || allUsers.length > 0) return;
+      const users = await dataSyncService.loadAllUsers();
+      if (users.length > 0) onUpdateUsers(users);
+    };
+    loadUsersIfNeeded();
+  }, [activeTab, allUsers.length, onUpdateUsers]);
+
+  const resolvePlanLimits = (planId: PlanTemplate['id']) => {
+    const plan = plansConfig.find(p => p.id === planId) || plansConfig[0];
+    return {
+      limiteUsuarios: plan?.limiteUsuarios ?? 0,
+      limiteObras: plan?.limiteObras ?? 0,
+      limiteMaoDeObra: plan?.limiteMaoDeObra ?? 0,
+      limiteMaquinario: plan?.limiteMaquinario ?? 0,
+      limiteCargos: plan?.limiteCargos ?? 0,
+    };
+  };
+
+  const defaultPlanId = (plansConfig[0]?.id ?? 'PRO') as PlanTemplate['id'];
+  const defaultPlanLimits = resolvePlanLimits(defaultPlanId);
+
   const [formData, setFormData] = useState({
     nome: '',
     cnpj: '',
     emailAdmin: '',
     nomeGestor: '',
     logoUrl: '',
-    plano: 'PRO' as PlanTemplate['id'],
-    limiteUsuarios: 20,
-    limiteObras: 10,
-    limiteMaoDeObra: 50,
-    limiteMaquinario: 20,
-    limiteCargos: 15,
+    plano: defaultPlanId,
+    ...defaultPlanLimits,
     vencimento: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
   });
 
@@ -122,17 +148,11 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
 
   // Automação de limites baseada no plano selecionado
   useEffect(() => {
-    const selectedPlan = plansConfig.find(p => p.id === formData.plano);
-    if (selectedPlan) {
-      setFormData(prev => ({ 
-        ...prev, 
-        limiteUsuarios: selectedPlan.limiteUsuarios, 
-        limiteObras: selectedPlan.limiteObras,
-        limiteMaoDeObra: selectedPlan.limiteMaoDeObra,
-        limiteMaquinario: selectedPlan.limiteMaquinario,
-        limiteCargos: selectedPlan.limiteCargos
-      }));
-    }
+    const limits = resolvePlanLimits(formData.plano);
+    setFormData(prev => ({
+      ...prev,
+      ...limits
+    }));
   }, [formData.plano, plansConfig]);
 
   const maskCNPJ = (value: string) => {
@@ -286,14 +306,14 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       }
     } catch (error) {
       console.error('Erro crítico ao disparar e-mail de boas-vindas:', error);
-      alert('Falha ao enviar e-mail de boas-vindas. O usuário foi criado, mas notifique-o manualmente sobre as credenciais.');
+      toast.error('Falha ao enviar e-mail de boas-vindas. O usuário foi criado, mas notifique-o manualmente sobre as credenciais.');
       return false;
     }
   };
 
   const handleNextStep = () => {
     const error = validateStep1();
-    if (error) { alert(error); return; }
+    if (error) { toast.error(error); return; }
     setCurrentStep(2);
   };
 
@@ -380,38 +400,85 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
     }
   };
 
-  const handleEditTenant = (tenant: Tenant) => {
+  const handleEditTenant = async (tenant: Tenant) => {
     setEditingTenantId(tenant.id);
-    const adminUser = allUsers.find(u => u.tenantId === tenant.id && u.role === Role.ADMIN);
+    
+    // Carregar registro fresco do banco para garantir dados atualizados
+    const freshTenant = await dataSyncService.loadTenantData(tenant.id);
+    const tenantData = freshTenant || tenant;
+    
+    const adminUser = allUsers.find(u => getUserTenantId(u) === tenantData.id && isAdminUser(u));
+    const planLimits = resolvePlanLimits((tenantData.planoId || defaultPlanId) as PlanTemplate['id']);
+    
     setFormData({
-      nome: tenant.nome,
-      cnpj: tenant.cnpj,
+      nome: tenantData.nome,
+      cnpj: tenantData.cnpj,
       emailAdmin: adminUser?.email || '',
       nomeGestor: adminUser?.nome || '',
-      logoUrl: tenant.logoUrl || '',
-      plano: tenant.planoId || 'PRO',
-      limiteUsuarios: tenant.limiteUsuarios,
-      limiteObras: tenant.limiteObras || 5,
-      limiteMaoDeObra: tenant.limiteMaoDeObra || 50,
-      limiteMaquinario: tenant.limiteMaquinario || 20,
-      limiteCargos: tenant.limiteCargos || 15,
-      vencimento: tenant.dataFimLicenca
+      logoUrl: tenantData.logoUrl || '',
+      plano: (tenantData.planoId || defaultPlanId) as PlanTemplate['id'],
+      limiteUsuarios: tenantData.limiteUsuarios ?? planLimits.limiteUsuarios,
+      limiteObras: tenantData.limiteObras ?? planLimits.limiteObras,
+      limiteMaoDeObra: tenantData.limiteMaoDeObra ?? planLimits.limiteMaoDeObra,
+      limiteMaquinario: tenantData.limiteMaquinario ?? planLimits.limiteMaquinario,
+      limiteCargos: tenantData.limiteCargos ?? planLimits.limiteCargos,
+      vencimento: tenantData.dataFimLicenca
     });
     setCurrentStep(1);
     setShowAddModal(true);
   };
 
   const handleSimulateAccess = (tenant: Tenant) => {
-    const tenantAdmin = allUsers.find(u => u.tenantId === tenant.id && u.role === Role.ADMIN);
-    if (tenantAdmin) onSimulateAccess(tenantAdmin);
-    else alert("Administrador não encontrado.");
+    console.log('[Admin Lookup - Tenant]', { id: tenant.id, nome: tenant.nome });
+    console.log('[Admin Lookup - Array]', {
+      total: allUsers.length,
+      users: allUsers.map(u => ({ 
+        id: u.id, 
+        tenantId: (u as any).tenantId, 
+        tenant_id: (u as any).tenant_id,
+        role: (u as any).role 
+      }))
+    });
+    
+    // Debug do primeiro usuário para auditoria completa
+    if (allUsers.length > 0) {
+      console.log('[Admin Lookup - Primeiro Usuário (Chaves Completas)]', Object.keys(allUsers[0]));
+      console.log('[Admin Lookup - Primeiro Usuário (Valores)]', allUsers[0]);
+    }
+    
+    // Busca com comparação flexível (string normalizada e case-insensitive)
+    const tenantAdmin = allUsers.find(u => {
+      const userTenantId = getUserTenantId(u);
+      const userRole = (u.role || '').toUpperCase();
+      const match = String(userTenantId) === String(tenant.id) && (userRole === 'ADMIN' || userRole === 'SUPERADMIN');
+      
+      console.log('[Admin Lookup - Comparação]', {
+        userId: u.id,
+        userTenantId,
+        targetTenantId: tenant.id,
+        userRole,
+        tenantMatch: String(userTenantId) === String(tenant.id),
+        roleMatch: userRole === 'ADMIN' || userRole === 'SUPERADMIN',
+        finalMatch: match
+      });
+      
+      return match;
+    });
+    
+    if (tenantAdmin) {
+      console.log('[Admin Lookup - SUCCESS]', { adminId: tenantAdmin.id, nome: tenantAdmin.nome });
+      onSimulateAccess(tenantAdmin);
+    } else {
+      console.error('[Admin Lookup - FAILED] Nenhum admin encontrado para tenant:', tenant.id);
+      toast.error('Administrador não encontrado para esta organização.');
+    }
   };
 
   const resetModal = () => {
+    const limits = resolvePlanLimits(defaultPlanId);
     setFormData({ 
-      nome: '', cnpj: '', emailAdmin: '', nomeGestor: '', logoUrl: '', plano: 'PRO', 
-      limiteUsuarios: 10, limiteObras: 5, 
-      limiteMaoDeObra: 50, limiteMaquinario: 20, limiteCargos: 15,
+      nome: '', cnpj: '', emailAdmin: '', nomeGestor: '', logoUrl: '', plano: defaultPlanId, 
+      ...limits,
       vencimento: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0] 
     });
     setCurrentStep(1);
@@ -420,13 +487,13 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
 
   const handleSaveTenant = async () => {
     const error = validateStep1();
-    if (error) { alert(error); return; }
-    const tenantId = editingTenantId || `tnt-${Date.now()}`;
+    if (error) { toast.error(error); return; }
+    const tenantId = editingTenantId || uuidv4();
     const newTenant: Tenant = { 
       id: tenantId, 
       nome: formData.nome.toUpperCase().trim(), 
       cnpj: formData.cnpj, 
-      logoUrl: formData.logoUrl || 'https://cdn-icons-png.flaticon.com/512/3119/3119338.png', 
+      logoUrl: formData.logoUrl || '', 
       limiteUsuarios: formData.limiteUsuarios, 
       limiteObras: formData.limiteObras,
       limiteMaoDeObra: formData.limiteMaoDeObra,
@@ -437,16 +504,32 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       status: LicenseStatus.ATIVA 
     };
     if (editingTenantId) {
+      // Atualizar tenant existente
       onUpdateTenants(allTenants.map(t => t.id === editingTenantId ? newTenant : t));
       
+      // Sincronizar com Supabase
+      try {
+        await dataSyncService.syncTenants([newTenant], editingTenantId);
+        console.log('[MasterAdmin] Tenant atualizado no Supabase');
+      } catch (error) {
+        console.warn('[MasterAdmin] Tenant enfileirado para sincronização posterior:', error);
+      }
+      
       // ✅ ATUALIZAR NOME DO GESTOR TAMBÉM
-      const adminUser = allUsers.find(u => u.tenantId === editingTenantId && u.role === Role.ADMIN);
+      const adminUser = allUsers.find(u => getUserTenantId(u) === editingTenantId && isAdminUser(u));
       if (adminUser) {
+        const updatedUser = { ...adminUser, nome: formData.nomeGestor.toUpperCase().trim() };
         onUpdateUsers(allUsers.map(u => 
-          u.id === adminUser.id 
-            ? { ...u, nome: formData.nomeGestor.toUpperCase().trim() }
-            : u
+          u.id === adminUser.id ? updatedUser : u
         ));
+        
+        // Sincronizar usuário atualizado
+        try {
+          await dataSyncService.syncUsers([updatedUser], editingTenantId);
+          console.log('[MasterAdmin] Gestor atualizado no Supabase');
+        } catch (error) {
+          console.warn('[MasterAdmin] Gestor enfileirado para sincronização posterior:', error);
+        }
       }
       
       setToastMessage("Organização atualizada com sucesso!");
@@ -461,13 +544,26 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
         role: Role.ADMIN, 
         ativo: true, 
         cargo: 'Administrador Master',
-        password: tempPassword,  // ✅ NOVO: Armazenar senha
-        lastPasswordChange: new Date().toISOString()  // ✅ NOVO: Data de criação
+        password: tempPassword,  // ✅ Armazenar senha para Auth
+        lastPasswordChange: new Date().toISOString()
       };
       
-      // Atualizar estado
+      // Atualizar estado local
       onUpdateTenants([...allTenants, newTenant]);
       onUpdateUsers([...allUsers, newUser]);
+      
+      // ✅ SINCRONIZAR COM SUPABASE (Tenant + User com Auth)
+      try {
+        // Sincronizar tenant
+        await dataSyncService.syncTenants([newTenant], tenantId);
+        console.log('[MasterAdmin] Tenant criado no Supabase');
+        
+        // Sincronizar usuário (isso vai chamar authService.signup automaticamente)
+        await dataSyncService.syncUsers([newUser], tenantId);
+        console.log('[MasterAdmin] Usuário criado no Supabase Auth + tabela users');
+      } catch (error) {
+        console.warn('[MasterAdmin] Operações enfileiradas para sincronização posterior:', error);
+      }
       
       // ✅ DISPARAR E-MAIL DE BOAS-VINDAS
       try {
@@ -483,6 +579,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       }
     }
     
+    toast.success(editingTenantId ? 'Empresa atualizada com sucesso!' : 'Empresa cadastrada com sucesso!');
     setShowSuccessToast(true); 
     setShowAddModal(false); 
     resetModal();
@@ -501,10 +598,38 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Defina preços e limites automáticos para novos clientes</p>
           </div>
           <button 
-            onClick={() => { 
-              localStorage.setItem('ep_plans_config', JSON.stringify(plansConfig));
-              setToastMessage("Configurações de planos salvas globalmente!");
+            onClick={async () => {
+              setToastMessage('⏳ Salvando planos...');
               setShowSuccessToast(true);
+              
+              // 1. Salvar templates de plano no Supabase
+              const success = await dataSyncService.upsertPlanTemplates(plansConfig);
+              
+              if (success) {
+                // 2. Sincronizar limites para todos os tenants associados
+                console.log('🔄 [MasterAdmin] Iniciando sincronização cascata de limites');
+                const syncResult = await dataSyncService.syncPlanLimitsToTenants(plansConfig);
+                
+                // 3. Persistir também no localStorage como fallback
+                localStorage.setItem('ep_plans_config', JSON.stringify(plansConfig));
+                
+                if (syncResult.success) {
+                  setToastMessage('✅ Planos e limites sincronizados com sucesso!');
+                  setShowSuccessToast(true);
+                  console.log('🎉 [MasterAdmin] Plan templates e tenant limits sincronizados');
+                } else {
+                  const firstError = syncResult.errors[0] || 'Erro desconhecido ao sincronizar limites';
+                  setToastMessage(`⚠️ Erro ao sincronizar limites: ${firstError}`);
+                  setShowSuccessToast(true);
+                  console.warn('⚠️ [MasterAdmin] Planos salvos, limites não sincronizados', syncResult.errors);
+                }
+              } else {
+                // Se falhar em salvar os planos, salva localmente mesmo assim
+                localStorage.setItem('ep_plans_config', JSON.stringify(plansConfig));
+                setToastMessage('⚠️ Planos salvos localmente (erro ao sincronizar com servidor)');
+                setShowSuccessToast(true);
+                console.warn('⚠️ [MasterAdmin] Plan templates salvos localmente apenas');
+              }
             }}
             className="px-8 py-3.5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-2xl hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-2"
           >
@@ -935,7 +1060,17 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
                         </td>
                         <td className="px-8 py-5 text-xs font-bold text-slate-600">{new Date(t.dataFimLicenca).toLocaleDateString()}</td>
                         <td className="px-8 py-5 text-center"><span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase ${t.status === LicenseStatus.ATIVA ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>{t.status}</span></td>
-                        <td className="px-8 py-5 text-right"><div className="flex justify-end gap-2"><button onClick={() => handleSimulateAccess(t)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all"><Zap size={14} /></button><button onClick={() => handleEditTenant(t)} className="p-2 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-900 hover:text-white transition-all"><Edit2 size={14} /></button><button onClick={() => handleDeleteTenant(t.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all"><Trash2 size={14} /></button></div></td>
+                        <td className="px-8 py-5 text-right"><div className="flex justify-end gap-2">
+                          <ProtectedElement resource={PermissionResource.TENANTS} action={Action.MANAGE}>
+                            <button onClick={() => handleSimulateAccess(t)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all"><Zap size={14} /></button>
+                          </ProtectedElement>
+                          <ProtectedElement resource={PermissionResource.TENANTS} action={Action.UPDATE}>
+                            <button onClick={() => handleEditTenant(t)} className="p-2 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-900 hover:text-white transition-all"><Edit2 size={14} /></button>
+                          </ProtectedElement>
+                          <ProtectedElement resource={PermissionResource.TENANTS} action={Action.DELETE}>
+                            <button onClick={() => handleDeleteTenant(t.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all"><Trash2 size={14} /></button>
+                          </ProtectedElement>
+                        </div></td>
                       </tr>
                     </React.Fragment>
                   );
@@ -954,23 +1089,52 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               <div className="space-y-6">
                 <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Software Primary Name</label><input type="text" value={globalConfig.softwareName} onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, softwareName: e.target.value.toUpperCase() })} className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-black uppercase outline-none focus:ring-4 focus:ring-blue-100 transition-all" /></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Subtítulo Estratégico</label><input type="text" value={globalConfig.softwareSubtitle || ''} onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, softwareSubtitle: e.target.value })} placeholder="Ex: Engineering Suite" className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-100 transition-all" /></div>
                 <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Global Theme Color</label><div className="flex gap-4"><input type="color" value={globalConfig.primaryColor} onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, primaryColor: e.target.value })} className="w-16 h-14 bg-white border border-slate-100 rounded-2xl cursor-pointer p-1 overflow-hidden" /><input type="text" value={globalConfig.primaryColor} onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, primaryColor: e.target.value })} className="flex-1 bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-black uppercase outline-none" /></div></div>
               </div>
               <div className="space-y-6 flex flex-col items-center justify-center p-8 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
                 <div className="w-24 h-24 rounded-3xl flex items-center justify-center shadow-2xl mb-4" style={{ backgroundColor: globalConfig.primaryColor }}>{globalConfig.systemLogoUrl ? <img src={globalConfig.systemLogoUrl} className="w-16 h-16 object-contain" /> : <Zap className="text-white" size={40} />}</div>
+                <input
+                  type="text"
+                  value={globalConfig.systemLogoUrl || ''}
+                  onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, systemLogoUrl: e.target.value })}
+                  placeholder="URL da logo (PNG/SVG)"
+                  className="w-full bg-white border border-slate-200 px-4 py-2 rounded-xl text-[9px] font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 transition-all mb-3"
+                />
                 <button 
                   onClick={() => {
-                    setToastMessage("Identidade visual atualizada com sucesso!");
+                    setToastMessage("URL de logo atualizada. Salve para persistir!");
                     setShowSuccessToast(true);
                   }}
-                  className="px-6 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"><Upload size={14} /> Change Asset</button>
+                  className="px-6 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"><Upload size={14} /> Adicionar Logo URL</button>
               </div>
             </div>
             <div className="mt-12 pt-8 border-t border-slate-50 flex justify-end">
               <button 
-                onClick={() => {
-                  setToastMessage("Configurações globais persistidas!");
-                  setShowSuccessToast(true);
+                onClick={async () => {
+                  console.log('💾 [MasterAdmin] Salvando global config:', globalConfig);
+                  const success = await dataSyncService.upsertGlobalConfig(globalConfig);
+                  if (success) {
+                    // Atualizar estado local do App (força re-render)
+                    onUpdateGlobalConfig(globalConfig);
+                    
+                    // Persistir no localStorage para sobrevivência de F5
+                    localStorage.setItem('ep_global_config', JSON.stringify(globalConfig));
+                    
+                    // Aplicar CSS Variables imediatamente
+                    if (globalConfig.primaryColor) {
+                      document.documentElement.style.setProperty('--primary-color', globalConfig.primaryColor);
+                    }
+                    
+                    // Feedback visual
+                    setToastMessage("✅ Configurações globais salvas no Supabase!");
+                    setShowSuccessToast(true);
+                    
+                    console.log('✅ [MasterAdmin] Global config aplicado em toda interface');
+                  } else {
+                    setToastMessage("⚠️ Erro ao salvar no Supabase. Configurações salvas localmente.");
+                    setShowSuccessToast(true);
+                  }
                 }}
                 className="flex items-center gap-3 px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-2xl"><Save size={18} /> Persist Global Assets</button>
             </div>
@@ -997,7 +1161,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
                 {currentStep === 1 ? (
                   <motion.div initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="space-y-6">
                     <div className="space-y-4">
-                      <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Fantasia da Organização</label><input type="text" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} placeholder="Ex: Construtora Horizon" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-black uppercase outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
+                      <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Fantasia da Organização</label><input type="text" value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} placeholder="Nome da Organização" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-black uppercase outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">CNPJ Fiscal</label><input type="text" value={formData.cnpj} onChange={handleCNPJChange} placeholder="00.000.000/0000-00" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Nome Completo do Gestor</label><input type="text" value={formData.nomeGestor} onChange={e => setFormData({...formData, nomeGestor: e.target.value})} placeholder="Ex: João Silva Santos" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-black uppercase outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
                       <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">E-mail Administrativo Master</label><input type="email" value={formData.emailAdmin} onChange={e => setFormData({...formData, emailAdmin: e.target.value})} placeholder="admin@empresa.com" className="w-full bg-white border border-slate-200 px-5 py-3 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-50 transition-all" /></div>
@@ -1045,7 +1209,11 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
 
               <div className="px-10 py-6 bg-white border-t border-slate-100 shrink-0 flex items-center justify-between">
                 <div className="flex gap-4"><button onClick={() => { setShowAddModal(false); resetModal(); }} className="text-[11px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>{currentStep === 2 && <button onClick={() => setCurrentStep(1)} className="flex items-center gap-2 text-slate-600 font-black text-[11px] uppercase tracking-widest hover:text-slate-900 transition-all"><ChevronLeft size={16} /> Voltar</button>}</div>
-                <div className="flex gap-4">{currentStep === 1 ? (<button onClick={handleNextStep} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">Próximo <ChevronRight size={16} /></button>) : (<button onClick={handleSaveTenant} className="text-white px-10 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all" style={{ backgroundColor: primaryColor }}><CheckCircle2 size={18} /> {editingTenantId ? 'Salvar Alterações' : 'Concluir Cadastro'}</button>)}</div>
+                <div className="flex gap-4">{currentStep === 1 ? (<button onClick={handleNextStep} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all">Próximo <ChevronRight size={16} /></button>) : (
+                  <ProtectedElement resource={PermissionResource.TENANTS} action={editingTenantId ? Action.UPDATE : Action.CREATE}>
+                    <button onClick={handleSaveTenant} className="text-white px-10 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all" style={{ backgroundColor: primaryColor }}><CheckCircle2 size={18} /> {editingTenantId ? 'Salvar Alterações' : 'Concluir Cadastro'}</button>
+                  </ProtectedElement>
+                )}</div>
               </div>
             </motion.div>
           </div>

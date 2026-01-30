@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Project, Task, DailyLog, Tenant, Resource } from '../types';
+import { EmptyProjectState } from '../components/EmptyProjectState';
 import {
   ChevronDown,
   ChevronRight,
@@ -31,6 +32,8 @@ interface GanttChartViewProps {
   dailyLogs: DailyLog[];
   tenant: Tenant;
   onTasksChange: (tasks: Task[]) => void;
+  setActiveTab?: (tab: string) => void;
+  selectedProjectId?: string;
 }
 
 type ZoomLevel = 'dias' | 'semanas' | 'meses';
@@ -50,8 +53,10 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
   dailyLogs,
   tenant,
   onTasksChange,
+  setActiveTab,
+  selectedProjectId: selectedProjectIdProp,
 }) => {
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(selectedProjectIdProp || '');
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('semanas');
   const [sortBy, setSortBy] = useState<SortField>('wbs');
   const [expandedWBS, setExpandedWBS] = useState<Set<string>>(new Set());
@@ -60,6 +65,10 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState(0);
+
+  useEffect(() => {
+    setSelectedProjectId(selectedProjectIdProp || '');
+  }, [selectedProjectIdProp]);
 
   const COLUMN_WIDTH = COLUMN_WIDTH_CONFIG[zoomLevel];
 
@@ -166,7 +175,7 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
   // ==================== DADOS PROCESSADOS ====================
 
   const selectedProject = useMemo(
-    () => projects.find(p => p.id === selectedProjectId) || projects[0],
+    () => selectedProjectId ? projects.find(p => p.id === selectedProjectId) : null,
     [selectedProjectId, projects]
   );
 
@@ -424,7 +433,24 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
   const filteredTasks = tasksByWBS.filter(isTaskVisible);
 
   return (
-    <div className="h-full w-full bg-slate-50 flex flex-col overflow-hidden">
+    <>
+      {!selectedProjectId ? (
+        <div className="h-full w-full bg-slate-50 flex items-center justify-center p-6">
+          <EmptyProjectState
+            title="Nenhuma Obra Selecionada"
+            message={projects.length === 0 
+              ? "Crie uma obra no menu Projetos para visualizar o cronograma e o gráfico de Gantt."
+              : "Selecione uma obra no menu Projetos para visualizar o cronograma e o gráfico de Gantt."
+            }
+            primaryAction={{
+              label: 'Ir para Projetos',
+              onClick: () => setActiveTab?.('obras')
+            }}
+            onNavigateToDashboard={() => setActiveTab?.('obras')}
+          />
+        </div>
+      ) : (
+      <div className="h-full w-full bg-slate-50 flex flex-col overflow-hidden">
       {/* HEADER */}
       <div className="bg-white border-b border-slate-100 p-6 space-y-4 shrink-0">
         <div className="flex items-center justify-between">
@@ -701,7 +727,8 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      )}    </>
   );
 };
 

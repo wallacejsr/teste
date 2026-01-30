@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Project, Task, Resource, DailyLog } from '../types';
 import { calculateFinancialEVA, countWorkDays } from '../services/planningEngine';
+import { EmptyProjectState } from '../components/EmptyProjectState';
 import { 
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine
@@ -28,6 +29,7 @@ interface FinanceiroViewProps {
   tasks: Task[];
   resources: Resource[];
   dailyLogs: DailyLog[];
+  setActiveTab?: (tab: string) => void;
 }
 
 const FinanceiroView: React.FC<FinanceiroViewProps> = ({ 
@@ -37,15 +39,16 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
   onOpenUpgrade,
   tasks, 
   resources, 
-  dailyLogs 
+  dailyLogs,
+  setActiveTab
 }) => {
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(project?.id || null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (project) {
+    if (project?.id) {
       setSelectedProjectId(project.id);
     }
-  }, [project]);
+  }, [project?.id]);
 
   // VERIFICAÇÃO DINÂMICA DE RECURSOS
   const hasGestaoFinanceira = planFeatures.includes('Gestão Financeira');
@@ -123,17 +126,8 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  if (!currentProject) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-300">
-        <Activity size={48} className="mb-4 opacity-20" />
-        <p className="text-sm font-black uppercase tracking-widest">Nenhuma obra selecionada</p>
-      </div>
-    );
-  }
-
   const cards = [
-    { label: 'Orçamento (BAC)', value: formatCurrency(financials.bac), subtext: `Teto Estimado: ${formatCurrency(currentProject.orcamento)}`, icon: Wallet, color: 'text-slate-900', bg: 'bg-white' },
+    { label: 'Orçamento (BAC)', value: formatCurrency(financials.bac), subtext: `Teto Estimado: ${formatCurrency(currentProject?.orcamento || 0)}`, icon: Wallet, color: 'text-slate-900', bg: 'bg-white' },
     { label: 'Reserva Técnica', value: formatCurrency(financials.technicalReserve), subtext: 'Margem de Segurança', icon: AlertCircle, color: financials.technicalReserve < 0 ? 'text-red-600' : 'text-blue-600', bg: 'bg-white' },
     { label: 'Valor Agregado (EV)', value: formatCurrency(financials.ev), subtext: 'Produção Convertida em R$', icon: Target, color: 'text-blue-600', bg: 'bg-white' },
     { label: 'Gasto Real (AC)', value: formatCurrency(financials.ac), subtext: financials.ac === 0 ? 'Nenhum custo registrado' : 'Consolidado (Base + Extras)', icon: DollarSign, color: 'text-orange-600', bg: 'bg-white' },
@@ -142,6 +136,28 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
 
   return (
     <div className="flex flex-col gap-8 animate-in fade-in duration-500 pb-20 relative">
+      
+      {/* Empty State quando nenhuma obra selecionada */}
+      {!selectedProjectId && (
+        <EmptyProjectState
+          title="Nenhuma Obra Selecionada"
+          message="Selecione uma obra no menu Projetos para visualizar a análise financeira e valor agregado."
+          primaryAction={{
+            label: 'Ir para Projetos',
+            onClick: () => setActiveTab?.('obras')
+          }}
+          secondaryAction={
+            projects.length > 0 ? {
+              label: `Continuar com ${projects[0].nome}`,
+              onClick: () => setSelectedProjectId(projects[0].id)
+            } : undefined
+          }
+          onNavigateToDashboard={() => setActiveTab?.('obras')}
+        />
+      )}
+
+      {selectedProjectId && (
+      <div className="flex flex-col gap-8">
       
       {/* Camada de Desfoque e Trava para Planos sem Gestão Financeira */}
       {!hasGestaoFinanceira && (
@@ -207,15 +223,15 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
                 <div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div><span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">AC</span></div>
               </div>
             </div>
-            <div className="h-[400px]">
+            <div className="h-[400px] min-h-[400px] w-full">
               {evaData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={evaData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="date" fontSize={10} fontWeight="900" axisLine={false} tickLine={false} tickMargin={10} />
-                    <YAxis fontSize={10} fontWeight="900" axisLine={false} tickLine={false} domain={[0, (dataMax: number) => Math.max(dataMax, currentProject.orcamento * 1.1)]} tickFormatter={v => `R$ ${v/1000}k`} />
+                    <YAxis fontSize={10} fontWeight="900" axisLine={false} tickLine={false} domain={[0, (dataMax: number) => Math.max(dataMax, (currentProject?.orcamento || 0) * 1.1)]} tickFormatter={v => `R$ ${v/1000}k`} />
                     <Tooltip contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.1)', padding: '20px' }} labelStyle={{ fontSize: '11px', fontWeight: '900', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase' }} formatter={(v: number) => formatCurrency(v)} />
-                    <ReferenceLine y={currentProject.orcamento} stroke="#94a3b8" strokeDasharray="8 4" strokeWidth={2} label={{ position: 'right', value: 'TETO', fill: '#94a3b8', fontSize: 9, fontWeight: '900' }} />
+                    <ReferenceLine y={currentProject?.orcamento || 0} stroke="#94a3b8" strokeDasharray="8 4" strokeWidth={2} label={{ position: 'right', value: 'TETO', fill: '#94a3b8', fontSize: 9, fontWeight: '900' }} />
                     <Area type="monotone" dataKey="pv" fillOpacity={0.03} fill="#3b82f6" stroke="#3b82f6" strokeWidth={2} name="Planejado" />
                     <Line type="monotone" dataKey="ev" stroke="#10b981" strokeWidth={4} dot={false} name="Agregado" connectNulls={true} />
                     <Line type="monotone" dataKey="ac" stroke="#f97316" strokeWidth={4} dot={false} name="Realizado" connectNulls={true} />
@@ -224,7 +240,7 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
               ) : (
                 <div className="h-full flex flex-col items-center justify-center bg-slate-50/50 rounded-3xl border border-dashed border-slate-100 text-center px-12">
                   <Target size={32} className="text-slate-200 mb-4" />
-                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Aguardando consolidação dos dados financeiros para {currentProject.nome}</p>
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Aguardando consolidação dos dados financeiros para {currentProject?.nome || 'Obra'}</p>
                 </div>
               )}
             </div>
@@ -232,7 +248,7 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
 
           <div className="bg-white p-10 rounded-[32px] border border-slate-100 shadow-sm flex flex-col">
             <h3 className="text-xs font-black text-[#1e293b] uppercase tracking-[0.2em] mb-10">Composição por Ativo</h3>
-            <div className="flex-1 min-h-[250px] relative">
+            <div className="flex-1 min-h-[250px] w-full relative">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={compositionData} cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={8} dataKey="value">
@@ -308,6 +324,8 @@ const FinanceiroView: React.FC<FinanceiroViewProps> = ({
           </div>
         </div>
       </div>
+    </div>
+      )}
     </div>
   );
 };

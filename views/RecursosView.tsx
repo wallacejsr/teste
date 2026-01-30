@@ -29,6 +29,20 @@ const isWorkDay = (date: Date): boolean => {
   return day !== 0 && day !== 6; // 0 = Domingo, 6 = Sábado
 };
 
+// Função auxiliar para obter a chave do recurso (normalizada e com múltiplos fallbacks)
+const getResourceKey = (res: Resource | undefined): string | null => {
+  if (!res) return null;
+  
+  // Testa múltiplas propriedades comuns para capturar a função/cargo
+  // Prioridade: cargoNome (campo padrão) → categoria → nome (fallback)
+  const key = res.cargoNome || res.categoria || res.nome || null;
+  
+  if (!key) return null;
+  
+  // Normaliza: transforma em maiúsculas e remove espaços extras
+  return key.toUpperCase().trim();
+};
+
 const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [displayMode, setDisplayMode] = useState<'pessoas' | 'horas'>('pessoas');
@@ -75,7 +89,8 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
     relevantTasks.forEach(task => {
       task.alocacoes.forEach(aloc => {
         const res = resources.find(r => r.id === aloc.recursoId);
-        if (res && res.nome) roles.add(res.nome);
+        const resourceKey = getResourceKey(res);
+        if (resourceKey) roles.add(resourceKey);
       });
     });
     return Array.from(roles).sort();
@@ -126,7 +141,8 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
       const taskEnd = new Date(task.fimPlanejado + 'T00:00:00');
       task.alocacoes.forEach(aloc => {
         const res = resources.find(r => r.id === aloc.recursoId);
-        if (!res || (activeFilters.length > 0 && !activeFilters.includes(res.nome))) return;
+        const resourceKey = getResourceKey(res);
+        if (!resourceKey || (activeFilters.length > 0 && !activeFilters.includes(resourceKey))) return;
 
         Object.keys(data).forEach(bucketKey => {
           const bucket = data[bucketKey];
@@ -149,7 +165,7 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
             }
             contribution = (displayMode === 'horas') ? weeklySum : (isActiveAtSomeWorkDay ? aloc.quantidade : 0);
           }
-          bucket[res.nome] = (bucket[res.nome] || 0) + contribution;
+          bucket[resourceKey] = (bucket[resourceKey] || 0) + contribution;
           bucket.total += contribution;
         });
       });
@@ -339,18 +355,18 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Ativos no Gráfico</p>
             <div className="space-y-5">
               {availableRoles.length > 0 ? (
-                availableRoles.map((role, idx) => {
-                  const isFiltered = activeFilters.length === 0 || activeFilters.includes(role);
-                  const activeItems = histogramData.filter(d => d[role] > 0);
-                  const total = activeItems.reduce((acc, curr) => acc + (curr[role] || 0), 0);
+                availableRoles.map((cargo, idx) => {
+                  const isFiltered = activeFilters.length === 0 || activeFilters.includes(cargo);
+                  const activeItems = histogramData.filter(d => d[cargo] > 0);
+                  const total = activeItems.reduce((acc, curr) => acc + (curr[cargo] || 0), 0);
                   const avg = (total / (activeItems.length || 1));
                   const displayAvg = displayMode === 'horas' ? avg.toFixed(0) : avg.toFixed(1).replace('.0', '');
                   
                   return (
-                    <div key={role} className={`flex items-center justify-between transition-opacity ${isFiltered ? 'opacity-100' : 'opacity-30'}`}>
+                    <div key={cargo} className={`flex items-center justify-between transition-opacity ${isFiltered ? 'opacity-100' : 'opacity-30'}`}>
                       <div className="flex items-center gap-3">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colors[idx % colors.length] }}></div>
-                        <span className="text-[11px] font-black text-[#1e293b] uppercase tracking-tight truncate max-w-[120px]">{role}</span>
+                        <span className="text-[11px] font-black text-[#1e293b] uppercase tracking-tight truncate max-w-[120px]">{cargo}</span>
                       </div>
                       <span className="text-[11px] font-black text-slate-400">{displayAvg}</span>
                     </div>
@@ -411,14 +427,14 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
                   wrapperStyle={{ paddingTop: '50px', fontSize: '9px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.05em' }}
                 />
                 
-                {availableRoles.map((role, idx) => (
+                {availableRoles.map((cargo, idx) => (
                   <Bar 
-                    key={role}
-                    dataKey={role} 
+                    key={cargo}
+                    dataKey={cargo} 
                     stackId="a" 
                     fill={colors[idx % colors.length]} 
                     radius={[0, 0, 0, 0]}
-                    hide={activeFilters.length > 0 && !activeFilters.includes(role)}
+                    hide={activeFilters.length > 0 && !activeFilters.includes(cargo)}
                   >
                     {histogramData.map((entry, index) => (
                       <Cell 
@@ -476,7 +492,7 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
             <thead>
               <tr className="bg-slate-50/50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                 <th className="px-10 py-5">Período / Data</th>
-                {availableRoles.map(role => <th key={role} className="px-10 py-5 text-center">{role}</th>)}
+                {availableRoles.map(cargo => <th key={cargo} className="px-10 py-5 text-center">{cargo}</th>)}
                 <th className="px-10 py-5 text-right bg-blue-50/30 text-blue-600">Total</th>
               </tr>
             </thead>
@@ -489,11 +505,11 @@ const RecursosView: React.FC<RecursosViewProps> = ({ tasks, projects, resources 
                       <span className="text-[9px] font-bold text-slate-300">{row.fullDate}</span>
                     </div>
                   </td>
-                  {availableRoles.map(role => (
-                    <td key={role} className="px-10 py-5 text-center text-[11px] font-black text-slate-700 group-hover:text-blue-600 transition-colors">
+                  {availableRoles.map(cargo => (
+                    <td key={cargo} className="px-10 py-5 text-center text-[11px] font-black text-slate-700 group-hover:text-blue-600 transition-colors">
                       {displayMode === 'horas' 
-                        ? (row[role] > 0 ? row[role].toFixed(0) : '-') 
-                        : (row[role] > 0 ? row[role].toString().replace('.0', '') : '-')}
+                        ? (row[cargo] > 0 ? row[cargo].toFixed(0) : '-') 
+                        : (row[cargo] > 0 ? row[cargo].toString().replace('.0', '') : '-')}
                     </td>
                   ))}
                   <td className={`px-10 py-5 text-right text-[11px] font-black ${row.total > effectiveLimit ? 'text-red-500' : 'text-blue-600'}`}>

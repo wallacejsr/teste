@@ -1,5 +1,9 @@
 import React, { useState, useRef, useMemo } from 'react';
+import { toast } from 'sonner';
 import { User, Tenant, Role, GlobalConfig, PlanTemplate } from '../types';
+import { authService } from '../services/authService'; // 🔐 Named export
+import { dataSyncService } from '../services/dataService';
+import { useImageUpload } from '../hooks/useImageUpload';
 import { 
   User as UserIcon, 
   Building, 
@@ -21,9 +25,12 @@ import {
   Calendar,
   Lock,
   Check,
-  AlertCircle
+  AlertCircle,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ImageUploader from '../components/ImageUploader';
+import ImagePreviewModal from '../components/ImagePreviewModal';
 
 interface ProfileViewProps {
   user: User;
@@ -56,9 +63,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [previewImageOpen, setPreviewImageOpen] = useState(false);
+  const [selectedPreviewUrl, setSelectedPreviewUrl] = useState<string>('');
   const sigInputRef = useRef<HTMLInputElement>(null);
-  const logoInputRef = useRef<HTMLInputElement>(null);
-  const sysLogoInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // Avatar upload state
+  const { loading: avatarLoading, error: avatarError, progress: avatarProgress, imageUrl: avatarUrl, upload: uploadAvatar, reset: resetAvatarUpload } = useImageUpload();
 
   const isSuperAdmin = user.role === Role.SUPERADMIN;
   const isAdmin = user.role === Role.ADMIN || isSuperAdmin;
@@ -76,7 +87,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     e.preventDefault();
     // Bloqueio corrigido usando o limite efetivo de 50
     if (allUsers.length >= effectiveUserLimit) {
-      alert("Capacidade da licença atingida. Solicite upgrade no Master Admin.");
+       toast.error('Capacidade da licença atingida. Solicite upgrade no Master Admin.');
       return;
     }
     const formData = new FormData(e.currentTarget);
@@ -93,17 +104,60 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     setShowInviteModal(false);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'signature' | 'logo' | 'syslogo') => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'signature') => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
       if (type === 'signature') onUpdateUser({ ...user, signatureUrl: result });
-      else if (type === 'logo') onUpdateTenant({ ...tenant, logoUrl: result });
-      else if (type === 'syslogo') onUpdateGlobalConfig({ ...globalConfig, systemLogoUrl: result });
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleLogoUpload = async (url: string) => {
+    // 1. Atualizar estado local
+    const updatedTenant = { ...tenant, logoUrl: url };
+    onUpdateTenant(updatedTenant);
+    
+    // 2. Persistir no banco de dados
+    try {
+      await dataSyncService.syncTenants([updatedTenant], tenant.id);
+      console.log('[ProfileView] Logo URL saved to database:', url);
+    } catch (error) {
+      console.error('[ProfileView] Error saving logo URL to database:', error);
+    }
+  };
+
+  const handleAvatarUpload = async (url: string) => {
+    // 1. Atualizar estado local
+    const updatedUser = { ...user, avatarUrl: url };
+    onUpdateUser(updatedUser);
+    onUpdateUsers(allUsers.map(u => (u.id === updatedUser.id ? updatedUser : u)));
+    
+    // 2. Persistir no banco de dados
+    try {
+      console.log('[ProfileView] Saving avatar to database:', {
+        userId: user.id,
+        tenantId: user.tenantId,
+        avatarUrl: url,
+        userObj: updatedUser
+      });
+      
+      await dataSyncService.syncUsers([updatedUser], user.tenantId);
+      console.log('[ProfileView] ✓ Avatar URL saved to database:', url);
+    } catch (error) {
+      console.error('[ProfileView] ✗ Error saving avatar URL to database:', error);
+    }
+  };
+
+  const handleSysLogoUpload = (url: string) => {
+    onUpdateGlobalConfig({ ...globalConfig, systemLogoUrl: url });
+  };
+
+  const handlePreviewImage = (url: string) => {
+    setSelectedPreviewUrl(url);
+    setPreviewImageOpen(true);
   };
 
   /* =====================================================
@@ -146,16 +200,24 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       setPasswordLoading(true);
       
-      // Simular delay de processamento
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('🔐 [ProfileView] Iniciando troca de senha via authService');
       
-      // Atualizar usuário com nova senha
+      // Chamar authService real (Supabase Auth)
+      const result = await authService.updatePassword(newPassword);
+      
+      console.log('🔐 [ProfileView] Resultado authService:', result);
+      
+      if (!result.success) {
+        // Erro do Supabase
+        setPasswordError(result.error || 'Erro desconhecido ao atualizar senha.');
+        return;
+      }
+      
+      // ✅ Sucesso: Atualizar user local com lastPasswordChange
       const updatedUser = {
         ...user,
-        password: newPassword,
         lastPasswordChange: new Date().toISOString()
       };
-      
       onUpdateUser(updatedUser);
       
       // Resetar formulário
@@ -164,10 +226,20 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       setConfirmPassword('');
       setShowPasswordModal(false);
       
-      alert('Senha alterada com sucesso! ✅');
+      // Toast de sucesso (simular toast nativo)
+      const toastDiv = document.createElement('div');
+      toastDiv.className = 'fixed top-8 right-8 z-[300] bg-emerald-500 text-white px-8 py-4 rounded-2xl shadow-2xl font-black text-xs uppercase tracking-widest animate-in fade-in slide-in-from-top-5 duration-500';
+      toastDiv.textContent = '✅ Senha alterada com sucesso!';
+      document.body.appendChild(toastDiv);
+      
+      setTimeout(() => {
+        toastDiv.classList.add('animate-out', 'fade-out', 'slide-out-to-top-5');
+        setTimeout(() => toastDiv.remove(), 500);
+      }, 4000);
+      
     } catch (error) {
-      console.error('Erro ao alterar senha:', error);
-      setPasswordError('Erro ao processar a alteração. Tente novamente.');
+      console.error('❌ [ProfileView] Exception ao alterar senha:', error);
+      setPasswordError('Erro inesperado. Tente novamente ou contate o suporte.');
     } finally {
       setPasswordLoading(false);
     }
@@ -236,18 +308,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
           </>
         )}
 
-        {isSuperAdmin && (
-          <button 
-            onClick={() => setActiveSubTab('branding')}
-            className={`w-full flex items-center justify-between p-4 rounded-[20px] transition-all group ${activeSubTab === 'branding' ? 'bg-slate-900 text-white shadow-2xl' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
-          >
-            <div className="flex items-center gap-4">
-              <Palette size={18} />
-              <span className="text-[11px] font-black uppercase tracking-widest">SaaS Branding</span>
-            </div>
-            <ChevronRight size={14} className={activeSubTab === 'branding' ? 'opacity-100' : 'opacity-0'} />
-          </button>
-        )}
+        {/* SaaS Branding moved to Master Admin Config. White-label menu */}
 
         <div className="pt-10">
            <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[32px] text-white shadow-2xl overflow-hidden relative group">
@@ -278,18 +339,95 @@ const ProfileView: React.FC<ProfileViewProps> = ({
         {activeSubTab === 'perfil' && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-xl">
             <div className="flex items-center gap-8 mb-8">
-              <div className="relative group shrink-0 w-20 h-20 rounded-3xl overflow-hidden border-4 border-slate-50 shadow-md">
-                <div 
-                  className="w-full h-full flex items-center justify-center font-black text-2xl text-white transition-transform group-hover:scale-105"
-                  style={{ backgroundColor: primaryColor }}
-                >
-                  {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover block" /> : user.nome[0]}
+              <div className="shrink-0 flex flex-col items-center gap-2">
+                {/* Avatar Interativo - Clean Design */}
+                <div className="relative group">
+                  {/* Avatar com Foto */}
+                  {user.avatarUrl || avatarUrl ? (
+                    <div className="relative w-28 h-28 rounded-3xl overflow-hidden border-4 border-slate-50 shadow-lg cursor-pointer transition-transform group-hover:scale-105">
+                      <img 
+                        src={avatarUrl || user.avatarUrl} 
+                        alt="Avatar"
+                        className="w-full h-full object-cover"
+                        onClick={() => handlePreviewImage(avatarUrl || user.avatarUrl!)}
+                      />
+                      {/* Overlay Hover com Câmera */}
+                      <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer rounded-3xl">
+                        <Camera size={28} className="text-white" />
+                        <input 
+                          ref={avatarInputRef}
+                          type="file" 
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const url = await uploadAvatar(file, user.id, { bucket: 'fotos-usuario', tenantId: user.tenantId, maxSizeMB: 3 });
+                                await handleAvatarUpload(url);
+                                resetAvatarUpload();
+                              } catch (error) {
+                                console.error('Erro no upload:', error);
+                              }
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    /* Avatar Padrão com Inicial */
+                    <label className="relative w-28 h-28 rounded-3xl border-4 border-slate-50 shadow-lg flex items-center justify-center font-black text-5xl text-white cursor-pointer transition-transform group-hover:scale-105" style={{ backgroundColor: primaryColor }}>
+                      {user.nome[0]?.toUpperCase()}
+                      {/* Overlay Hover com Câmera */}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-3xl flex items-center justify-center">
+                        <Camera size={28} className="text-white" />
+                      </div>
+                      <input 
+                        ref={avatarInputRef}
+                        type="file" 
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const url = await uploadAvatar(file, user.id, { bucket: 'fotos-usuario', tenantId: user.tenantId, maxSizeMB: 3 });
+                              await handleAvatarUpload(url);
+                              resetAvatarUpload();
+                            } catch (error) {
+                              console.error('Erro no upload:', error);
+                            }
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
                 </div>
-                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white pointer-events-none">
-                  <Camera size={20} />
+
+                {/* Status Feedback - Discreto e Abaixo */}
+                <div className="text-center text-xs h-6 flex items-center justify-center">
+                  {avatarLoading && (
+                    <div className="flex items-center gap-1 text-blue-600 font-semibold">
+                      <div className="animate-spin rounded-full h-3 w-3 border border-blue-600 border-t-transparent"></div>
+                      <span>{avatarProgress}%</span>
+                    </div>
+                  )}
+                  {avatarUrl && !avatarError && !avatarLoading && (
+                    <div className="flex items-center gap-1 text-green-600 font-semibold">
+                      <CheckCircle2 size={14} />
+                      <span>Enviado</span>
+                    </div>
+                  )}
+                  {avatarError && (
+                    <div className="flex items-center gap-1 text-red-600 font-semibold">
+                      <AlertCircle size={14} />
+                      <span>Erro</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="min-w-0">
+
+              <div className="min-w-0 flex-1">
                 <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter truncate max-w-md">{user.nome}</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-100 bg-slate-50 text-slate-500">{user.role}</span>
@@ -341,17 +479,35 @@ const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex flex-col md:flex-row gap-8">
                <div className="shrink-0 space-y-3">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block text-center">Logo da Empresa</label>
-                  <div 
-                    onClick={() => logoInputRef.current?.click()}
-                    className="w-40 h-40 bg-slate-50 border-2 border-dashed border-slate-200 rounded-[32px] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-all overflow-hidden group shadow-inner aspect-square mx-auto"
-                  >
-                    {tenant.logoUrl ? (
-                      <img src={tenant.logoUrl} className="w-full h-full object-cover block" alt="Logo" />
-                    ) : (
-                      <Upload size={24} className="text-slate-200" />
-                    )}
-                    <input ref={logoInputRef} type="file" accept="image/*" onChange={e => handleFileUpload(e, 'logo')} className="hidden" />
-                  </div>
+                  
+                  {/* Preview do Logo Atual */}
+                  {tenant.logoUrl && (
+                    <div className="mb-4 relative group mx-auto w-40">
+                      <img 
+                        src={tenant.logoUrl} 
+                        alt="Logo atual"
+                        className="w-40 h-40 object-cover rounded-[32px] border border-slate-200 cursor-pointer"
+                        onClick={() => handlePreviewImage(tenant.logoUrl!)}
+                      />
+                      <button
+                        onClick={() => handlePreviewImage(tenant.logoUrl!)}
+                        className="absolute top-2 right-2 p-2 bg-blue-500 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all"
+                        title="Visualizar logo"
+                      >
+                        <Eye size={16} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ImageUploader Component */}
+                  <ImageUploader
+                    entityId={tenant.id}
+                    tenantId={tenant.id}
+                    bucket="fotos-recurso"
+                    label="Upload de Logo (WebP)"
+                    onUploadSuccess={handleLogoUpload}
+                    maxSizeMB={5}
+                  />
                </div>
 
                <div className="flex-1 space-y-4">
@@ -460,7 +616,20 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                       <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2">Última Alteração de Senha</p>
                       <p className="text-sm font-black text-emerald-800">
                         {user.lastPasswordChange 
-                          ? new Date(user.lastPasswordChange).toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' })
+                          ? (() => {
+                              const date = new Date(user.lastPasswordChange);
+                              const formatted = new Intl.DateTimeFormat('pt-BR', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false
+                              }).format(date);
+                              // Formato: DD/MM/YYYY às HH:mm
+                              const [datePart, timePart] = formatted.split(' ');
+                              return `${datePart} às ${timePart}`;
+                            })()
                           : 'Nunca alterada'
                         }
                       </p>
@@ -672,48 +841,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
           </motion.div>
         )}
 
-        {activeSubTab === 'branding' && isSuperAdmin && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-slate-950 p-8 rounded-[40px] border border-white/5 shadow-2xl text-white">
-            <h3 className="text-xs font-black uppercase tracking-[0.4em] mb-8 flex items-center gap-3" style={{ color: primaryColor }}>
-              <Palette size={18} /> Branding Experience
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-               <div className="space-y-4 text-center">
-                  <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] block">Logo Sidebar</label>
-                  <div 
-                    onClick={() => sysLogoInputRef.current?.click()}
-                    className="w-40 h-40 bg-white/5 border-2 border-dashed border-white/10 rounded-[32px] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-all overflow-hidden group shadow-inner aspect-square mx-auto"
-                  >
-                    {globalConfig.systemLogoUrl ? (
-                      <img src={globalConfig.systemLogoUrl} className="w-full h-full object-cover block" alt="Sys Logo" />
-                    ) : (
-                      <Upload size={32} className="text-white/20" />
-                    )}
-                    <input ref={sysLogoInputRef} type="file" accept="image/*" onChange={e => handleFileUpload(e, 'syslogo')} className="hidden" />
-                  </div>
-               </div>
-
-               <div className="space-y-6 pt-2">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] px-1">Nome do Software</label>
-                    <input type="text" value={globalConfig.softwareName} onChange={e => onUpdateGlobalConfig({...globalConfig, softwareName: e.target.value.toUpperCase()})} className="w-full bg-white/5 border border-white/10 px-5 py-2.5 rounded-xl text-sm font-black uppercase outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-white" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] px-1">Subtítulo Estratégico</label>
-                    <input type="text" value={globalConfig.softwareSubtitle || ''} onChange={e => onUpdateGlobalConfig({...globalConfig, softwareSubtitle: e.target.value})} placeholder="SaaS Engineering" className="w-full bg-white/5 border border-white/10 px-5 py-2.5 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500/20 transition-all text-white/60" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] px-1">Cor Primária</label>
-                    <div className="flex gap-4">
-                      <input type="color" value={globalConfig.primaryColor} onChange={e => onUpdateGlobalConfig({...globalConfig, primaryColor: e.target.value})} className="w-14 h-12 bg-white/5 border border-white/10 rounded-xl cursor-pointer p-1 overflow-hidden" />
-                      <input type="text" value={globalConfig.primaryColor} onChange={e => onUpdateGlobalConfig({...globalConfig, primaryColor: e.target.value})} className="flex-1 bg-white/5 border border-white/10 px-5 py-2.5 rounded-xl text-xs font-black uppercase outline-none" />
-                    </div>
-                  </div>
-               </div>
-            </div>
-          </motion.div>
-        )}
+        {/* SaaS Branding moved to Master Admin Config. White-label menu */}
       </div>
 
       {/* JANELA DE MODAL TRIPARTITE (CONVITE) - ESTRUTURA 500PX ALTURA */}
@@ -786,6 +914,14 @@ const ProfileView: React.FC<ProfileViewProps> = ({
           </motion.div>
         </div>
       )}
+
+      {/* Preview Modal */}
+      <ImagePreviewModal
+        isOpen={previewImageOpen}
+        images={selectedPreviewUrl ? [selectedPreviewUrl] : []}
+        title="Preview da Imagem"
+        onClose={() => setPreviewImageOpen(false)}
+      />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Resource, Task, Project, Tenant, User, PlanTemplate } from '../types';
+import { toast } from 'sonner';
+import { Resource, Task, Project, Tenant, User, PlanTemplate, RoleDefinition } from '../types';
 import { 
   Users, 
   Truck, 
@@ -16,22 +17,9 @@ import {
   ChevronDown,
   Lock 
 } from 'lucide-react';
-
-interface RoleDefinition {
-  id: string;
-  nome: string;
-  hhPadrao: number;
-  categoria: string;
-}
-
-const DEFAULT_ROLES: RoleDefinition[] = [
-  { id: 'c-1', nome: 'Engenheiro', hhPadrao: 80, categoria: 'Engenharia' },
-  { id: 'c-2', nome: 'Mestre de Obras', hhPadrao: 45, categoria: 'Produção' },
-  { id: 'c-3', nome: 'Pedreiro', hhPadrao: 25, categoria: 'Produção' },
-  { id: 'c-4', nome: 'Eletricista', hhPadrao: 35, categoria: 'Produção' },
-  { id: 'c-5', nome: 'Administrativo', hhPadrao: 22, categoria: 'Administrativo' },
-  { id: 'c-6', nome: 'Apoio Técnico', hhPadrao: 20, categoria: 'Apoio' },
-];
+import { ProtectedElement } from '../hooks/usePermission';
+import { Resource as PermissionResource, Action } from '../types/permissions';
+import { dataSyncService } from '../services/dataService';
 
 interface EquipeViewProps {
   resources: Resource[];
@@ -61,12 +49,34 @@ const EquipeView: React.FC<EquipeViewProps> = ({
   const [activeTab, setActiveTab] = useState<'human' | 'equip' | 'roles'>('human');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
+  const [editingRole, setEditingRole] = useState<RoleDefinition | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roles, setRoles] = useState<RoleDefinition[]>(DEFAULT_ROLES);
+  const [roles, setRoles] = useState<RoleDefinition[]>([]);
 
   const currentPlan = useMemo(() => {
     return plansConfig.find(p => p.id === activeTenant.planoId);
   }, [plansConfig, activeTenant.planoId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRoles = async () => {
+      try {
+        const fetched = await dataSyncService.loadRoles(activeTenant.id);
+        if (isMounted) {
+          setRoles(fetched);
+        }
+      } catch (error) {
+        console.error('[EquipeView] Error loading roles', error);
+        if (isMounted) {
+          setRoles([]);
+        }
+      }
+    };
+
+    fetchRoles();
+    return () => { isMounted = false; };
+  }, [activeTenant.id]);
 
   // Sincronização de limites operacionais vindos do plano
   const effectiveLaborLimit = currentPlan ? currentPlan.limiteMaoDeObra : activeTenant.limiteMaoDeObra;
@@ -102,6 +112,7 @@ const EquipeView: React.FC<EquipeViewProps> = ({
       cargoId: ''
     });
     setEditingResource(null);
+    setEditingRole(null);
   };
 
   const handleOpenAdd = () => {
@@ -114,6 +125,7 @@ const EquipeView: React.FC<EquipeViewProps> = ({
   };
 
   const handleEdit = (res: Resource) => {
+    setEditingRole(null);
     setEditingResource(res);
     setFormData({
       tipo: res.tipo as any,
@@ -125,6 +137,12 @@ const EquipeView: React.FC<EquipeViewProps> = ({
       cargoId: (res as any).cargoId || ''
     });
     setShowAddModal(true);
+  };
+
+  const handleDeleteResource = (id: string) => {
+    const confirmed = window.confirm('Remover este registro?');
+    if (!confirmed) return;
+    onRemoveResource(id);
   };
 
   useEffect(() => {
@@ -140,69 +158,288 @@ const EquipeView: React.FC<EquipeViewProps> = ({
     }
   }, [formData.cargoId, roles, editingResource]);
 
-  const handleSave = () => {
-    if (formData.tipo === 'CARGO') {
-      if (!formData.nome || !formData.custoHora || !formData.categoria) {
-        alert("Preencha todos os campos do cargo");
+  const handleEditRole = (role: RoleDefinition) => {
+    setEditingResource(null);
+    setEditingRole(role);
+    setFormData({
+      tipo: 'CARGO',
+      nome: role.nome,
+      custoHora: role.hhPadrao.toString(),
+      especialidade: '',
+      placaId: '',
+      categoria: role.categoria,
+      cargoId: ''
+    });
+    setShowAddModal(true);
+  };
+
+  const handleSave = async () => {
+    try {
+      if (formData.tipo === 'CARGO') {
+        if (!formData.nome || !formData.custoHora || !formData.categoria) {
+          toast.error('Preencha todos os campos do cargo');
+          return;
+        }
+
+        const rolePayload: RoleDefinition = {
+          id: editingRole?.id || (crypto.randomUUID ? crypto.randomUUID() : `role-${Date.now()}`),
+          tenantId: activeTenant.id,
+          nome: formData.nome,
+          hhPadrao: Number(formData.custoHora),
+          categoria: formData.categoria
+        };
+
+        const savedRole = await dataSyncService.upsertRole(rolePayload, activeTenant.id);
+        if (savedRole) {
+          setRoles(prev => editingRole ? prev.map(r => r.id === savedRole.id ? savedRole : r) : [...prev, savedRole]);
+        }
+
+        setShowAddModal(false);
+        resetForm();
         return;
       }
-      const newRole: RoleDefinition = {
-        id: `role-${Date.now()}`,
+
+      if (!formData.nome || !formData.custoHora) {
+        toast.error('Nome e Custo são obrigatórios');
+        return;
+      }
+
+      if (formData.tipo === 'HUMANO' && !formData.cargoId) {
+        toast.error('Selecione um cargo para o colaborador');
+        return;
+      }
+
+      const selectedRole = formData.tipo === 'HUMANO' ? roles.find(r => r.id === formData.cargoId) : undefined;
+
+      const newResource: Resource = {
+        id: editingResource ? editingResource.id : `res-${Date.now()}`,
+        tenantId: activeTenant.id, 
         nome: formData.nome,
-        hhPadrao: Number(formData.custoHora),
-        categoria: formData.categoria
-      };
-      setRoles(prev => [...prev, newRole]);
+        tipo: formData.tipo as 'HUMANO' | 'EQUIPAMENTO',
+        custoHora: Number(formData.custoHora),
+        categoria: formData.categoria,
+        ...(formData.tipo === 'HUMANO' 
+          ? { especialidade: formData.especialidade, cargoId: formData.cargoId, cargoNome: selectedRole?.nome } 
+          : { placaId: formData.placaId }
+        )
+      } as any;
+
+      onAddResource(newResource);
       setShowAddModal(false);
       resetForm();
-      return;
+    } catch (error) {
+      console.error('[EquipeView] Error saving data', error);
+      toast.error('Não foi possível salvar. Tente novamente.');
     }
+  };
 
-    if (!formData.nome || !formData.custoHora) {
-      alert("Nome e Custo são obrigatórios");
-      return;
+  const handleDeleteRole = async (roleId: string) => {
+    const confirmed = window.confirm('Remover este cargo? Colaboradores vinculados manterão a referência antiga.');
+    if (!confirmed) return;
+
+    try {
+      await dataSyncService.deleteRole(roleId, activeTenant.id);
+      setRoles(prev => prev.filter(r => r.id !== roleId));
+    } catch (error) {
+      console.error('[EquipeView] Error deleting role', error);
+      toast.error('Não foi possível remover o cargo.');
     }
-
-    if (formData.tipo === 'HUMANO' && !formData.cargoId) {
-      alert("Selecione um cargo para o colaborador");
-      return;
-    }
-
-    const selectedRole = formData.tipo === 'HUMANO' ? roles.find(r => r.id === formData.cargoId) : undefined;
-
-    const newResource: Resource = {
-      id: editingResource ? editingResource.id : `res-${Date.now()}`,
-      tenantId: activeTenant.id, 
-      nome: formData.nome,
-      tipo: formData.tipo as 'HUMANO' | 'EQUIPAMENTO',
-      custoHora: Number(formData.custoHora),
-      categoria: formData.categoria,
-      ...(formData.tipo === 'HUMANO' 
-        ? { especialidade: formData.especialidade, cargoId: formData.cargoId, cargoNome: selectedRole?.nome } 
-        : { placaId: formData.placaId }
-      )
-    } as any;
-
-    onAddResource(newResource);
-    setShowAddModal(false);
-    resetForm();
   };
 
   const resourceAnalytics = useMemo(() => {
     const analysis: Record<string, { totalHH: number }> = {};
+    
+    // Inicializa análise para todos os recursos
     resources.forEach(res => {
       analysis[res.id] = { totalHH: 0 };
     });
+
+    // Processa alocações em tarefas
     tasks.forEach(task => {
-      task.alocacoes.forEach(aloc => {
-        if (analysis[aloc.recursoId]) {
-          const hh = task.duracaoDias * 8 * aloc.quantidade;
-          analysis[aloc.recursoId].totalHH += hh;
-        }
-      });
+      // Trata alocações como array direto (formato padrão)
+      if (Array.isArray(task.alocacoes)) {
+        task.alocacoes.forEach(aloc => {
+          // Suporta ambos os formatos: objeto com recursoId ou string
+          const resId = typeof aloc === 'object' ? aloc.recursoId : aloc;
+          if (resId && analysis[resId]) {
+            const hh = task.duracaoDias * 8 * (typeof aloc === 'object' ? aloc.quantidade : 1);
+            analysis[resId].totalHH += hh;
+          }
+        });
+      }
     });
+    
     return analysis;
   }, [resources, tasks]);
+
+  // Descobre a alocação ativa hoje por recurso, tolerando alocações como JSON string
+  // Estrutura evoluída: suporta múltiplas obras por recurso
+  const activeAllocations = useMemo(() => {
+    const map: Record<string, Record<string, { projectName: string; tasks: string[] }>> = {};
+    
+    // Normaliza a data de hoje usando apenas formato YYYY-MM-DD para comparação segura
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayString = today.toISOString().split('T')[0]; // Formato: YYYY-MM-DD
+    
+    // Helper para converter data para string YYYY-MM-DD
+    const toDateString = (dateStr: string): string => {
+      try {
+        const d = new Date(dateStr + 'T00:00:00');
+        return d.toISOString().split('T')[0];
+      } catch {
+        return '';
+      }
+    };
+
+    // Normaliza ID: converte para string, remove espaços e transforma em lowercase
+    const normalizeId = (id: any): string => {
+      return String(id || '').trim().toLowerCase();
+    };
+
+    const normalizeAlocacoes = (alocacoes: any): any[] => {
+      if (Array.isArray(alocacoes)) {
+        return alocacoes;
+      }
+      if (typeof alocacoes === 'string' && alocacoes.trim()) {
+        try {
+          const parsed = JSON.parse(alocacoes);
+          if (Array.isArray(parsed)) {
+            return parsed;
+          }
+          return [];
+        } catch (error) {
+          return [];
+        }
+      }
+      return [];
+    };
+
+    // Extrai ID com suporte exaustivo a múltiplas variações de chaves
+    // Ordem: Postgres snake_case > camelCase > user-related > genérico
+    const extractResourceId = (aloc: any): string | null => {
+      if (typeof aloc === 'string') {
+        const normalized = normalizeId(aloc);
+        return normalized ? normalized : null;
+      }
+
+      if (typeof aloc === 'object' && aloc !== null) {
+        // Tenta em ordem de probabilidade
+        const possibleKeys = [
+          'recurso_id',    // Postgres snake_case
+          'resource_id',   // alternativa snake_case
+          'id_recurso',    // variação snake_case
+          'user_id',       // Pode ser vindo de user (CRÍTICO)
+          'usuario_id',    // Português
+          'recursoId',     // camelCase padrão
+          'resourceId',    // camelCase alternativo
+          'usuarioId',     // Português camelCase
+          'userId',        // user camelCase
+          'id'             // fallback genérico
+        ];
+
+        for (const key of possibleKeys) {
+          const value = aloc[key];
+          if (value !== undefined && value !== null && value !== '') {
+            const normalized = normalizeId(value);
+            if (normalized) {
+              return normalized;
+            }
+          }
+        }
+
+        return null;
+      }
+
+      return null;
+    };
+
+    // Extrai TODOS os IDs possíveis do objeto de alocação (para mapeamento duplo)
+    const extractAllResourceIds = (aloc: any): string[] => {
+      const ids: string[] = [];
+      
+      if (typeof aloc === 'string') {
+        const normalized = normalizeId(aloc);
+        if (normalized) ids.push(normalized);
+        return ids;
+      }
+
+      if (typeof aloc === 'object' && aloc !== null) {
+        // Chaves relacionadas a recurso
+        const resourceKeys = ['recurso_id', 'resource_id', 'id_recurso', 'recursoId', 'resourceId', 'id'];
+        // Chaves relacionadas a usuário
+        const userKeys = ['user_id', 'usuario_id', 'userId', 'usuarioId'];
+
+        // Extrai IDs de recurso
+        resourceKeys.forEach(key => {
+          const value = aloc[key];
+          if (value !== undefined && value !== null && value !== '') {
+            const normalized = normalizeId(value);
+            if (normalized && !ids.includes(normalized)) ids.push(normalized);
+          }
+        });
+
+        // Extrai IDs de usuário (também são importantes!)
+        userKeys.forEach(key => {
+          const value = aloc[key];
+          if (value !== undefined && value !== null && value !== '') {
+            const normalized = normalizeId(value);
+            if (normalized && !ids.includes(normalized)) ids.push(normalized);
+          }
+        });
+      }
+
+      return ids;
+    };
+
+    tasks.forEach(task => {
+      const alocacoes = normalizeAlocacoes((task as any).alocacoes);
+      if (!alocacoes.length) return;
+
+      // Normaliza datas usando apenas formato YYYY-MM-DD para evitar problemas de fuso horário
+      const startString = toDateString(task.inicioPlanejado);
+      const endString = toDateString(task.fimPlanejado);
+
+      // Comparação segura usando strings YYYY-MM-DD (ignora fuso horário completamente)
+      const isActiveToday = todayString >= startString && todayString <= endString;
+      
+      if (!isActiveToday) return;
+
+      const project = projects.find(p => p.id === task.obraId);
+
+      alocacoes.forEach((aloc, idx) => {
+        // Extrai TODOS os IDs possíveis para mapeamento duplo
+        const allIds = extractAllResourceIds(aloc);
+        
+        if (allIds.length === 0) {
+          return;
+        }
+
+        // Mapeia a tarefa para TODOS os IDs (resource_id E user_id)
+        allIds.forEach(resId => {
+          // Inicializa o recurso se ainda não existir
+          if (!map[resId]) {
+            map[resId] = {};
+          }
+          
+          // Inicializa a obra se ainda não existir para este recurso
+          if (!map[resId][task.obraId]) {
+            map[resId][task.obraId] = {
+              projectName: project?.nome || 'Obra sem título',
+              tasks: []
+            };
+          }
+          
+          // Adiciona tarefa se não estiver já na lista
+          if (!map[resId][task.obraId].tasks.includes(task.nome)) {
+            map[resId][task.obraId].tasks.push(task.nome);
+          }
+        });
+      });
+    });
+
+    return map;
+  }, [tasks, projects]);
 
   const filteredResources = resources.filter(r => 
     (activeTab === 'human' ? r.tipo === 'HUMANO' : r.tipo === 'EQUIPAMENTO') &&
@@ -272,9 +509,11 @@ const EquipeView: React.FC<EquipeViewProps> = ({
               <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
             </div>
           )}
-          <button onClick={handleOpenAdd} className={`p-2.5 rounded-xl transition-all shadow-lg active:scale-95 ${(activeTab === 'human' && isLaborLimitReached) || (activeTab === 'equip' && isEquipLimitReached) || (activeTab === 'roles' && isRolesLimitReached) ? 'bg-amber-500 text-white shadow-amber-100' : 'bg-[#0f172a] text-white hover:bg-slate-800'}`}>
-            {(activeTab === 'human' && isLaborLimitReached) || (activeTab === 'equip' && isEquipLimitReached) || (activeTab === 'roles' && isRolesLimitReached) ? <Lock size={20} /> : <Plus size={20} />}
-          </button>
+          <ProtectedElement resource={PermissionResource.RESOURCES} action={Action.CREATE}>
+            <button onClick={handleOpenAdd} className={`p-2.5 rounded-xl transition-all shadow-lg active:scale-95 ${(activeTab === 'human' && isLaborLimitReached) || (activeTab === 'equip' && isEquipLimitReached) || (activeTab === 'roles' && isRolesLimitReached) ? 'bg-amber-500 text-white shadow-amber-100' : 'bg-[#0f172a] text-white hover:bg-slate-800'}`}>
+              {(activeTab === 'human' && isLaborLimitReached) || (activeTab === 'equip' && isEquipLimitReached) || (activeTab === 'roles' && isRolesLimitReached) ? <Lock size={20} /> : <Plus size={20} />}
+            </button>
+          </ProtectedElement>
         </div>
       </div>
 
@@ -298,7 +537,14 @@ const EquipeView: React.FC<EquipeViewProps> = ({
                   </td>
                   <td className="px-8 py-5 font-black text-[#1e293b]">R$ {role.hhPadrao.toFixed(2)}</td>
                   <td className="px-8 py-5 text-right">
-                    <button className="p-2 text-slate-300 hover:text-blue-600 transition-colors"><Edit2 size={16} /></button>
+                    <div className="flex items-center justify-end gap-2">
+                      <ProtectedElement resource={PermissionResource.RESOURCES} action={Action.UPDATE}>
+                        <button onClick={() => handleEditRole(role)} className="p-2 text-slate-300 hover:text-blue-600 transition-colors"><Edit2 size={16} /></button>
+                      </ProtectedElement>
+                      <ProtectedElement resource={PermissionResource.RESOURCES} action={Action.DELETE}>
+                        <button onClick={() => handleDeleteRole(role.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                      </ProtectedElement>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -310,6 +556,40 @@ const EquipeView: React.FC<EquipeViewProps> = ({
           {filteredResources.map(res => {
             const stats = resourceAnalytics[res.id];
             const role = roles.find(r => r.id === (res as any).cargoId);
+            
+            // Normaliza o ID do recurso para matching com activeAllocations
+            const normalizedResId = String(res.id || '').trim().toLowerCase();
+            // Tenta encontrar pelo ID do Recurso OU pelo ID do Usuário vinculado (busca inteligente)
+            const normalizedUserId = res.userId ? String(res.userId || '').trim().toLowerCase() : null;
+            const allocations = activeAllocations[normalizedResId] || (normalizedUserId ? activeAllocations[normalizedUserId] : null);
+            
+            // Calcula quantas obras únicas o recurso está alocado
+            const projectIds = allocations ? Object.keys(allocations) : [];
+            const projectCount = projectIds.length;
+            
+            // Determina estilo do badge baseado no número de obras
+            let badgeStyles = {
+              container: 'bg-emerald-50/50 border-emerald-100 text-emerald-600',
+              dot: 'bg-emerald-500',
+              text: '● DISPONÍVEL'
+            };
+            
+            if (projectCount === 1) {
+              const firstProjectId = projectIds[0];
+              const projectName = allocations![firstProjectId].projectName;
+              badgeStyles = {
+                container: 'bg-blue-50/50 border-blue-100 text-blue-600',
+                dot: 'bg-blue-500',
+                text: `● OBRA: ${projectName}`
+              };
+            } else if (projectCount > 1) {
+              badgeStyles = {
+                container: 'bg-amber-50/50 border-amber-100 text-amber-600',
+                dot: 'bg-amber-500',
+                text: `● MÚLTIPLAS OBRAS (${projectCount})`
+              };
+            }
+            
             return (
               <div key={res.id} className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm hover:shadow-md transition-all group flex flex-col">
                 <div className="flex items-start justify-between mb-6">
@@ -317,8 +597,12 @@ const EquipeView: React.FC<EquipeViewProps> = ({
                     {res.tipo === 'HUMANO' ? <Users size={28} /> : <Truck size={28} />}
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => handleEdit(res)} className="p-2 text-slate-300 hover:text-blue-600 transition-colors"><Edit2 size={18} /></button>
-                    <button onClick={() => onRemoveResource(res.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                    <ProtectedElement resource={PermissionResource.RESOURCES} action={Action.UPDATE}>
+                      <button onClick={() => handleEdit(res)} className="p-2 text-slate-300 hover:text-blue-600 transition-colors"><Edit2 size={18} /></button>
+                    </ProtectedElement>
+                    <ProtectedElement resource={PermissionResource.RESOURCES} action={Action.DELETE}>
+                      <button onClick={() => handleDeleteResource(res.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                    </ProtectedElement>
                   </div>
                 </div>
                 <div className="space-y-1 mb-6">
@@ -338,7 +622,34 @@ const EquipeView: React.FC<EquipeViewProps> = ({
                     <div className="flex items-center gap-1 text-[#1e293b] font-black text-sm"><Clock size={14} className="text-slate-300" /> {stats?.totalHH || 0}h</div>
                   </div>
                 </div>
-                <div className="mt-auto"><div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-center gap-3"><CheckCircle2 size={16} className="text-emerald-500" /><p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Disponível em Campo</p></div></div>
+                <div className="mt-auto relative group/badge">
+                  <div className={`p-4 rounded-2xl border flex items-center gap-3 ${badgeStyles.container}`}>
+                    <div className={`w-2 h-2 rounded-full ${badgeStyles.dot}`} />
+                    <p className="text-[10px] font-black uppercase tracking-widest truncate">
+                      {badgeStyles.text}
+                    </p>
+                  </div>
+                  {allocations && projectCount > 0 && (
+                    <div className="absolute left-0 bottom-full mb-2 hidden group-hover/badge:block z-20">
+                      <div className="min-w-[220px] max-w-[280px] bg-slate-900 text-white text-[10px] rounded-xl shadow-xl p-4 space-y-3">
+                        <p className="font-black uppercase tracking-[0.2em] text-slate-300 border-b border-slate-700 pb-2">Tarefas de hoje</p>
+                        {projectIds.map((projectId, idx) => {
+                          const projectData = allocations[projectId];
+                          return (
+                            <div key={projectId} className={idx > 0 ? 'border-t border-slate-700 pt-3' : ''}>
+                              <p className="font-black text-blue-400 mb-1.5 uppercase tracking-wide">{projectData.projectName}</p>
+                              <ul className="list-disc list-inside space-y-1 ml-1">
+                                {projectData.tasks.map((taskName, taskIdx) => (
+                                  <li key={taskIdx} className="leading-tight text-white/80 text-[9px]">{taskName}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -349,7 +660,7 @@ const EquipeView: React.FC<EquipeViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-[6px] animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-4xl max-h-[95vh] rounded-[40px] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-400">
             <div className="px-6 md:px-10 py-6 md:py-8 border-b border-slate-100 flex items-center justify-between shrink-0">
-              <div><h3 className="text-xl md:text-2xl font-black text-[#1e293b] tracking-tight">{editingResource ? 'Editar Registro' : 'Novo Registro'}</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Configuração de ativos e cargos</p></div>
+              <div><h3 className="text-xl md:text-2xl font-black text-[#1e293b] tracking-tight">{(editingResource || editingRole) ? 'Editar Registro' : 'Novo Registro'}</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Configuração de ativos e cargos</p></div>
               <button onClick={() => setShowAddModal(false)} className="p-2 md:p-3 hover:bg-slate-100 rounded-full text-slate-300 transition-all"><X size={24} /></button>
             </div>
             
@@ -402,8 +713,8 @@ const EquipeView: React.FC<EquipeViewProps> = ({
             <div className="px-6 md:px-10 py-6 md:py-8 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
               <button onClick={() => setShowAddModal(false)} className="text-slate-400 font-black text-[10px] md:text-[11px] uppercase tracking-widest hover:text-slate-600 transition-colors">Cancelar</button>
               <button onClick={handleSave} className="bg-blue-600 text-white px-6 md:px-10 py-4 md:py-5 rounded-[20px] font-black text-[10px] md:text-[12px] uppercase tracking-[0.15em] shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-3">
-                {editingResource ? <CheckCircle2 size={18} /> : <Plus size={18} />}
-                {editingResource ? 'Salvar' : formData.tipo === 'CARGO' ? 'Criar Cargo' : 'Salvar Registro'}
+                {(editingResource || editingRole) ? <CheckCircle2 size={18} /> : <Plus size={18} />}
+                {(editingResource || editingRole) ? 'Salvar' : formData.tipo === 'CARGO' ? 'Criar Cargo' : 'Salvar Registro'}
               </button>
             </div>
           </div>

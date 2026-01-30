@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Project, Task, Resource, DailyLog, Tenant } from '../types';
+import { EmptyProjectState } from '../components/EmptyProjectState';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea
 } from 'recharts';
@@ -33,9 +35,11 @@ import {
   DollarSign,
   Clock
 } from 'lucide-react';
+import { ProtectedElement } from '../hooks/usePermission';
+import { Resource as PermissionResource, Action } from '../types/permissions';
 
 interface PlanejamentoViewProps {
-  project: Project;
+  project: Project | null;
   activeTenant: Tenant;
   planFeatures: string[]; // Nova Propriedade Dinâmica
   onOpenUpgrade: () => void;
@@ -43,6 +47,7 @@ interface PlanejamentoViewProps {
   resources: Resource[];
   dailyLogs: DailyLog[];
   onTasksChange: (tasks: Task[]) => void;
+  setActiveTab?: (tab: string) => void;
 }
 
 // ==========================================
@@ -237,7 +242,8 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
   tasks, 
   resources, 
   dailyLogs, 
-  onTasksChange 
+  onTasksChange,
+  setActiveTab
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
@@ -383,6 +389,22 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
   // ------------------------------------------
   // MEMOS E INTELIGÊNCIA DE DADOS
   // ------------------------------------------
+
+  if (!project) {
+    return (
+      <div className="h-full w-full bg-slate-50 flex items-center justify-center p-6">
+        <EmptyProjectState
+          title="Nenhuma Obra Selecionada"
+          message="Selecione uma obra no menu Projetos para visualizar o cronograma de atividades."
+          primaryAction={{
+            label: 'Ir para Projetos',
+            onClick: () => setActiveTab?.('obras')
+          }}
+          onNavigateToDashboard={() => setActiveTab?.('obras')}
+        />
+      </div>
+    );
+  }
 
   const projectTasksSorted = useMemo(() => {
     return tasks
@@ -607,11 +629,11 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
 
   const handleConfirmTask = () => {
     if (!formData.nome || !formData.inicio || !formData.fim) {
-      alert("Campos obrigatórios ausentes.");
+      toast.error('Campos obrigatórios ausentes.');
       return;
     }
     if (modalTab === 'tarefa' && !formData.parentWbs) {
-      alert("Selecione uma etapa pai.");
+      toast.error('Selecione uma etapa pai.');
       return;
     }
 
@@ -727,9 +749,11 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
           <div className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-700 shadow-sm flex items-center gap-2 uppercase tracking-widest">
             <Info size={14} className="text-blue-500" /> {project.nome}
           </div>
-          <button onClick={handleOpenAdd} className="flex items-center gap-2 px-6 py-3 bg-[#0f172a] text-white rounded-xl text-xs font-black hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 uppercase tracking-widest active:scale-95">
-            <Plus size={16} /> Nova Atividade
-          </button>
+          <ProtectedElement resource={PermissionResource.TASKS} action={Action.CREATE}>
+            <button onClick={handleOpenAdd} className="flex items-center gap-2 px-6 py-3 bg-[#0f172a] text-white rounded-xl text-xs font-black hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 uppercase tracking-widest active:scale-95">
+              <Plus size={16} /> Nova Atividade
+            </button>
+          </ProtectedElement>
         </div>
       </div>
 
@@ -967,9 +991,17 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
                       <button onClick={e => { e.stopPropagation(); setActiveActionMenuId(activeActionMenuId === task.id ? null : task.id); }} className="p-2 text-slate-300 hover:text-slate-800"><MoreHorizontal size={20} /></button>
                       {activeActionMenuId === task.id && (
                         <div className={`absolute right-8 ${index >= projectTasksSorted.length - 2 ? 'bottom-full mb-2' : 'top-10'} bg-white border border-slate-100 rounded-xl shadow-xl z-30 py-2 w-48 text-left animate-in fade-in zoom-in-95`}>
-                          <button onClick={() => handleEditTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-slate-50 text-slate-600"><Edit2 size={14} /> Editar</button>
-                          {!isParent && <button onClick={() => handleDuplicateTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-slate-50 text-slate-600"><Copy size={14} /> Duplicar</button>}
-                          <button onClick={() => handleDeleteTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-red-50 text-red-500"><Trash2 size={14} /> Excluir</button>
+                          <ProtectedElement resource={PermissionResource.TASKS} action={Action.UPDATE}>
+                            <button onClick={() => handleEditTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-slate-50 text-slate-600"><Edit2 size={14} /> Editar</button>
+                          </ProtectedElement>
+                          {!isParent && (
+                            <ProtectedElement resource={PermissionResource.TASKS} action={Action.CREATE}>
+                              <button onClick={() => handleDuplicateTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-slate-50 text-slate-600"><Copy size={14} /> Duplicar</button>
+                            </ProtectedElement>
+                          )}
+                          <ProtectedElement resource={PermissionResource.TASKS} action={Action.DELETE}>
+                            <button onClick={() => handleDeleteTask(task)} className="w-full px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-red-50 text-red-500"><Trash2 size={14} /> Excluir</button>
+                          </ProtectedElement>
                         </div>
                       )}
                     </td>
@@ -1119,7 +1151,9 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
                               {resources.map(r => <option key={r.id} value={r.id}>{r.nome}</option>)}
                             </select>
                             <input type="number" min="1" value={resourceQty} onChange={e => setResourceQty(Number(e.target.value))} className="w-14 bg-white border border-slate-200 px-2 py-2 rounded-lg text-center text-xs font-black" />
-                            <button onClick={handleAddResource} className="bg-[#0f172a] text-white px-3 rounded-lg hover:bg-slate-800 shadow-sm shrink-0 transition-colors"><Plus size={18} /></button>
+                            <ProtectedElement resource={PermissionResource.TASKS} action={Action.UPDATE}>
+                              <button onClick={handleAddResource} className="bg-[#0f172a] text-white px-3 rounded-lg hover:bg-slate-800 shadow-sm shrink-0 transition-colors"><Plus size={18} /></button>
+                            </ProtectedElement>
                           </div>
                         </div>
                       </div>
@@ -1158,12 +1192,14 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
                   ) : (
                     <>
                       {modalTab === 'tarefa' && <button onClick={() => setCurrentStep(1)} className="text-slate-400 font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:text-slate-600 transition-colors"><ChevronLeft size={14} /> Voltar</button>}
-                      <button 
-                        onClick={handleConfirmTask} 
-                        className="bg-blue-600 text-white px-10 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center gap-2 active:scale-95"
-                      >
-                        {editingTask ? 'Salvar Alterações' : 'Concluir Registro'}
-                      </button>
+                      <ProtectedElement resource={PermissionResource.TASKS} action={editingTask ? Action.UPDATE : Action.CREATE}>
+                        <button 
+                          onClick={handleConfirmTask} 
+                          className="bg-blue-600 text-white px-10 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center gap-2 active:scale-95"
+                        >
+                          {editingTask ? 'Salvar Alterações' : 'Concluir Registro'}
+                        </button>
+                      </ProtectedElement>
                     </>
                   )}
                </div>

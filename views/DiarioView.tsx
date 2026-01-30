@@ -1,6 +1,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { Project, Task, User, DailyLog, Tenant, Resource, GlobalConfig, Impedimento } from '../types';
+import { EmptyProjectState } from '../components/EmptyProjectState';
 import { 
   Sun, 
   Cloud, 
@@ -40,6 +42,11 @@ import {
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ProtectedElement } from '../hooks/usePermission';
+import { Resource as PermissionResource, Action } from '../types/permissions';
+import { useImageUpload } from '../hooks/useImageUpload';
+import ImageUploader from '../components/ImageUploader';
+import ImagePreviewModal from '../components/ImagePreviewModal';
 
 interface DiarioViewProps {
   project: Project | null;
@@ -56,6 +63,7 @@ interface DiarioViewProps {
   onRemoveDailyLog: (id: string) => void;
   dailyLogs: DailyLog[];
   user: User;
+  setActiveTab?: (tab: string) => void;
 }
 
 type WeatherCondition = 'SOL' | 'NUBLADO' | 'CHUVA' | 'IMPEDIDO';
@@ -84,7 +92,8 @@ const DiarioView: React.FC<DiarioViewProps> = ({
   onAddDailyLog, 
   onRemoveDailyLog,
   dailyLogs, 
-  user 
+  user,
+  setActiveTab: setActiveTabProp
 }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const pdfTemplateRef = useRef<HTMLDivElement>(null);
@@ -103,133 +112,93 @@ const DiarioView: React.FC<DiarioViewProps> = ({
   const hasPDFExport = planFeatures.includes('Relatórios PDF');
   const hasDigitalSignature = planFeatures.includes('Assinatura Digital');
 
+  // ============================================================================
+  // NOVO: Sistema de Abas e Estados Relacionados
+  // ============================================================================
+  type TabType = 'geral' | 'producao' | 'ocorrencias' | 'evidencias';
+  const [activeTabLocal, setActiveTabLocal] = useState<TabType>('geral');
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
   const [weatherMorning, setWeatherMorning] = useState<WeatherCondition>('SOL');
   const [weatherAfternoon, setWeatherAfternoon] = useState<WeatherCondition>('SOL');
   const [impediments, setImpediments] = useState<Impedimento[]>([]);
   const [advancements, setAdvancements] = useState<Record<string, { quantity: string, notes: string, extraCost: string }>>({});
   const [globalObservations, setGlobalObservations] = useState('');
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photosUrls, setPhotosUrls] = useState<string[]>([]);  // URLs de armazenamento ao invés de base64
+  const [previewPhotosOpen, setPreviewPhotosOpen] = useState(false);  // Modal de preview
+  const [aplicouCascata, setAplicouCascata] = useState(false);
+  
+  // Hook para upload de imagens
+  const { upload: uploadPhoto, loading: photoLoading, error: photoError } = useImageUpload();
+
+  const weatherOptions = useMemo(() => ([
+    { id: 'SOL', label: 'Céu Limpo', icon: Sun },
+    { id: 'NUBLADO', label: 'Nublado', icon: Cloud },
+    { id: 'CHUVA', label: 'Chuva', icon: CloudRain },
+    { id: 'IMPEDIDO', label: 'Impedido', icon: Wind }
+  ]), []);
+
+  // Estado para motivos de parada (persistência)
+  const [motivosList, setMotivosList] = useState<string[]>([
+    'Falta de Materiais',
+    'Condições Climáticas',
+    'Falta de Mão de Obra',
+    'Problemas Técnicos',
+    'Erro de Projeto',
+    'Atraso de Fornecedor'
+  ]);
+
+  // Estado para Modal de novo motivo
+  const [showMotivModal, setShowMotivModal] = useState(false);
+  const [motivInputValue, setMotivInputValue] = useState('');
+  const [motivInputRef, setMotivInputRef] = useState<HTMLInputElement | null>(null);
+  const [pendingImpedimentIndex, setPendingImpedimentIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (project) setSelectedProjectId(project.id);
   }, [project]);
 
-  const getWeatherInfo = (obs: string) => {
-    const match = obs.match(/\[MANHÃ: (.*?) \| TARDE: (.*?)\]/);
-    if (match) return { morning: match[1] as WeatherCondition, afternoon: match[2] as WeatherCondition };
-    return null;
-  };
-
-  const weatherOptions = [
-    { id: 'SOL', icon: Sun, label: 'Ensolarado' },
-    { id: 'NUBLADO', icon: Cloud, label: 'Nublado' },
-    { id: 'CHUVA', icon: CloudRain, label: 'Chuvoso' },
-    { id: 'IMPEDIDO', icon: Wind, label: 'Impraticável' },
-  ];
-
-  const getWeatherIcon = (type: WeatherCondition) => {
-    const option = weatherOptions.find(o => o.id === type);
-    return option ? <option.icon size={14} /> : <Sun size={14} />;
-  };
-
-  const availableTasks = useMemo(() => {
-    if (!selectedProjectId) return [];
-    return tasks.filter(t => {
-      const isFromProject = t.obraId === selectedProjectId;
-      const isActionable = t.wbs.includes('.') && t.qtdRealizada < t.qtdPlanejada;
-      if (!showAllLogs) {
-        return isFromProject && isActionable && 
-               selectedDate >= t.inicioPlanejado && 
-               selectedDate <= t.fimPlanejado;
-      }
-      return isFromProject && isActionable;
-    });
-  }, [tasks, selectedProjectId, selectedDate, showAllLogs]);
-
-  const timelineLogs = useMemo(() => {
-    if (!selectedProjectId) return [];
-    const projectLogs = dailyLogs.filter(l => l.tenantId === tenant.id && l.obraId === selectedProjectId);
-    const filtered = showAllLogs ? projectLogs : projectLogs.filter(l => l.data === selectedDate);
-    return filtered.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
-  }, [dailyLogs, selectedProjectId, selectedDate, showAllLogs, tenant.id]);
-
-  const handleAdvancementChange = (taskId: string, field: 'quantity' | 'notes' | 'extraCost', value: string) => {
-    setAdvancements(prev => ({
-      ...prev,
-      [taskId]: { ...(prev[taskId] || { quantity: '', notes: '', extraCost: '' }), [field]: value }
-    }));
-  };
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      Array.from(files).forEach(file => {
-        const reader = new FileReader();
-        reader.onloadend = () => setPhotos(prev => [...prev, reader.result as string]);
-        reader.readAsDataURL(file);
-      });
+  // Função para adicionar novo motivo à lista permanentemente
+  const handleAddNewMotivo = () => {
+    const novoMotivo = motivInputValue.trim().toUpperCase();
+    
+    if (!novoMotivo) {
+      setMotivInputValue('');
+      setShowMotivModal(false);
+      return;
     }
-  };
 
-  const resetForm = () => {
-    setAdvancements({});
-    setGlobalObservations('');
-    setPhotos([]);
-    setIsValidated(false);
-    setEditingLogId(null);
-    setImpediments([]);
-    setWeatherMorning('SOL');
-    setWeatherAfternoon('SOL');
-    setSelectedDate(new Date().toISOString().split('T')[0]);
-  };
-
-  const handleDelete = (logId: string) => {
-    if (window.confirm('Atenção: A exclusão deste RDO reverterá os avanços físicos nas tarefas. Confirmar?')) {
-      const log = dailyLogs.find(l => l.id === logId);
-      if (log) {
-        const revertedTasks = tasks.map(t => {
-          const adv = log.avancos.find(a => a.tarefaId === t.id);
-          return adv ? { ...t, qtdRealizada: Math.max(0, t.qtdRealizada - adv.quantidade) } : t;
-        });
-        onTasksChange(revertedTasks);
-        onRemoveDailyLog(logId);
+    // Evita duplicatas
+    if (!motivosList.includes(novoMotivo)) {
+      const novaLista = [...motivosList, novoMotivo];
+      setMotivosList(novaLista);
+      
+      // Se há um impedimento pendente, atribui o novo motivo
+      if (pendingImpedimentIndex !== null) {
+        const newI = [...impediments];
+        newI[pendingImpedimentIndex].motivo = novoMotivo;
+        setImpediments(newI);
       }
     }
+
+    // Limpa modal
+    setMotivInputValue('');
+    setShowMotivModal(false);
+    setPendingImpedimentIndex(null);
   };
 
-  const handleEdit = (log: DailyLog) => {
-    setEditingLogId(log.id);
-    setSelectedProjectId(log.obraId);
-    setSelectedDate(log.data);
-    const weatherData = getWeatherInfo(log.observacoes);
-    if (weatherData) {
-      setWeatherMorning(weatherData.morning);
-      setWeatherAfternoon(weatherData.afternoon);
-      setGlobalObservations(log.observacoes.replace(/\[MANHÃ: .*? \| TARDE: .*?\] /, ''));
-    } else {
-      setGlobalObservations(log.observacoes);
-    }
-    setPhotos(log.fotos);
-    const advMap: Record<string, { quantity: string, notes: string, extraCost: string }> = {};
-    log.avancos.forEach(a => {
-      advMap[a.tarefaId] = { quantity: a.quantidade.toString(), notes: a.observacaoTarefa || '', extraCost: a.custoExtra?.toString() || '' };
-    });
-    setAdvancements(advMap);
-    setIsValidated(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Função auxiliar para verificar se é dia útil (segunda a sexta)
+  // ============================================================================
+  // FUNÇÕES DE CALENDÁRIO E EFEITO CASCATA
+  // ============================================================================
   const isWorkDay = (date: Date): boolean => {
     const day = date.getDay();
-    return day !== 0 && day !== 6; // 0 = domingo, 6 = sábado
+    return day !== 0 && day !== 6; // 0=domingo, 6=sábado
   };
 
-  // Função auxiliar para adicionar dias úteis (ignora fins de semana)
   const addWorkDays = (dateStr: string, workDays: number): string => {
-    if (!dateStr || workDays <= 0) return dateStr;
-    
-    const date = new Date(dateStr + 'T00:00:00');
+    if (!dateStr) return '';
+    let date = new Date(dateStr + 'T00:00:00');
     let daysAdded = 0;
     
     while (daysAdded < workDays) {
@@ -242,135 +211,320 @@ const DiarioView: React.FC<DiarioViewProps> = ({
     return date.toISOString().split('T')[0];
   };
 
-  // Função auxiliar para aplicar efeito cascata nas tarefas (delay de 1 dia útil)
-  const applyCascade = (allTasks: Task[], changedTaskIndex: number): Task[] => {
-    let updated = [...allTasks];
-    const changedTask = updated[changedTaskIndex];
+  const nextWorkDay = (dateStr: string): string => {
+    if (!dateStr) return '';
+    let date = new Date(dateStr + 'T00:00:00');
+    date.setDate(date.getDate() + 1);
     
-    // Encontrar tarefas sucessoras que dependem desta tarefa
-    const successors = updated.filter(t => t.dependencias.includes(changedTask.id));
+    while (!isWorkDay(date)) {
+      date.setDate(date.getDate() + 1);
+    }
+    
+    return date.toISOString().split('T')[0];
+  };
+
+  const applyCascade = (allTasks: Task[], changedTaskId: string, newEndDate: string, visitedIds: Set<string> = new Set()): Task[] => {
+    // Proteção contra loop infinito (dependências circulares)
+    if (visitedIds.has(changedTaskId)) {
+      console.warn(`[Cascata] Ciclo detectado para tarefa ${changedTaskId}, abortando recursão`);
+      return allTasks;
+    }
+
+    const newVisited = new Set(visitedIds);
+    newVisited.add(changedTaskId);
+
+    let updated = [...allTasks];
+    const successors = updated.filter(t => t.dependencias.includes(changedTaskId));
     
     successors.forEach(succ => {
-      const succIndex = updated.findIndex(t => t.id === succ.id);
-      if (succIndex !== -1) {
-        // Adicionar 1 dia útil após o fim da tarefa anterior
-        const nextStart = addWorkDays(changedTask.fimPlanejado, 1);
-        
-        // Calcular nova data final mantendo a duração
-        let current = new Date(nextStart + 'T00:00:00');
-        let workDaysCount = 0;
-        
-        while (workDaysCount < succ.duracaoDias) {
-          if (isWorkDay(current)) {
-            workDaysCount++;
-          }
-          if (workDaysCount < succ.duracaoDias) {
-            current.setDate(current.getDate() + 1);
-          }
-        }
-        
-        const nextEnd = current.toISOString().split('T')[0];
-        
-        updated[succIndex] = {
-          ...updated[succIndex],
-          inicioPlanejado: nextStart,
-          fimPlanejado: nextEnd
-        };
-        
-        // Aplicar cascata recursivamente aos sucessores desta tarefa
-        updated = applyCascade(updated, succIndex);
-      }
+      const nextStart = nextWorkDay(newEndDate);
+      const nextEnd = addWorkDays(nextStart, succ.duracaoDias - 1);
+      
+      updated = updated.map(t => 
+        t.id === succ.id 
+          ? { ...t, inicioPlanejado: nextStart, fimPlanejado: nextEnd }
+          : t
+      );
+      updated = applyCascade(updated, succ.id, nextEnd, newVisited);
     });
     return updated;
   };
 
+  const availableTasks = useMemo(() => {
+    let filtered = tasks.filter((t) => {
+      // Filtra por projeto
+      if (selectedProjectId && t.obraId !== selectedProjectId) return false;
+      
+      // Apenas tarefas "folha" (com ponto no WBS) e não concluídas
+      if (!t.wbs.includes('.') || t.qtdRealizada >= t.qtdPlanejada) return false;
+      
+      return true;
+    });
+
+    // Se não estiver mostrando todos os logs, filtrar por data
+    if (!showAllLogs && selectedDate) {
+      const logDate = new Date(selectedDate + 'T00:00:00');
+      filtered = filtered.filter(task => {
+        const taskStart = new Date(task.inicioPlanejado + 'T00:00:00');
+        const taskEnd = new Date(task.fimPlanejado + 'T00:00:00');
+        return logDate >= taskStart && logDate <= taskEnd;
+      });
+    }
+
+    return filtered;
+  }, [tasks, selectedProjectId, showAllLogs, selectedDate]);
+
+  const timelineLogs = useMemo(() => {
+    let logs = dailyLogs.filter((log) => !selectedProjectId || log.obraId === selectedProjectId);
+    if (!showAllLogs) {
+      logs = logs.filter((log) => log.data === selectedDate);
+    }
+    return [...logs].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+  }, [dailyLogs, selectedProjectId, showAllLogs, selectedDate]);
+
+  const getWeatherInfo = (obs: string) => {
+    const match = obs.match(/\[MANHÃ:\s*(.*?)\s*\|\s*TARDE:\s*(.*?)\]/);
+    if (!match) return null;
+    return { morning: match[1], afternoon: match[2] };
+  };
+
+  const canAccessTab = (tab: TabType) => {
+    if (tab === 'geral') return true;
+    return !!selectedProjectId;
+  };
+
+  const isTabComplete = (tab: TabType) => {
+    switch (tab) {
+      case 'geral':
+        return !!selectedProjectId && !!selectedDate && !!weatherMorning && !!weatherAfternoon;
+      case 'producao':
+        return Object.values(advancements).some((a) => a.quantity !== '' && !Number.isNaN(Number(a.quantity)));
+      case 'ocorrencias':
+        return true;
+      case 'evidencias':
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const getMissingTabs = () => {
+    const labels: Record<TabType, string> = {
+      geral: 'Geral',
+      producao: 'Produção',
+      ocorrencias: 'Ocorrências',
+      evidencias: 'Evidências'
+    };
+    return (['geral', 'producao'] as TabType[])
+      .filter((tab) => !isTabComplete(tab))
+      .map((tab) => labels[tab]);
+  };
+
+  const canFinalize = () => {
+    // Aba geral deve estar completa
+    if (!isTabComplete('geral')) return false;
+
+    // Deve haver pelo menos um dos seguintes:
+    const hasAdvancement = Object.values(advancements).some((a) => a.quantity !== '' && !Number.isNaN(Number(a.quantity)) && Number(a.quantity) > 0);
+    const hasObservation = globalObservations.trim().length > 0;
+    const hasImpediment = impediments.length > 0;
+
+    return hasAdvancement || hasObservation || hasImpediment;
+  };
+
+  const resetForm = () => {
+    setAdvancements({});
+    setImpediments([]);
+    setGlobalObservations('');
+    setPhotosUrls([]);  // Limpar URLs de fotos
+    setWeatherMorning('SOL');
+    setWeatherAfternoon('SOL');
+    setEditingLogId(null);
+    setIsValidated(false);
+    setAplicouCascata(false);
+    setActiveTabLocal('geral');
+  };
+
+  const handleAdvancementChange = (taskId: string, field: 'quantity' | 'notes' | 'extraCost', value: string) => {
+    setAdvancements((prev) => {
+      const current = prev[taskId] || { quantity: '', notes: '', extraCost: '' };
+      return { ...prev, [taskId]: { ...current, [field]: value } };
+    });
+  };
+
+  const handlePhotoUpload = async (url: string) => {
+    // Callback chamado quando ImageUploader completa o upload com sucesso
+    if (url) {
+      setPhotosUrls((prev) => [...prev, url]);
+    }
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotosUrls((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleOpenMotivModal = (index: number) => {
+    setPendingImpedimentIndex(index);
+    setShowMotivModal(true);
+  };
+
   const handleSave = () => {
-    if (!selectedProjectId || !project) return;
-    const logAdvancements = Object.entries(advancements).map(([taskId, data]) => ({
+    try {
+      // ============================================================================
+      // VERIFICAÇÃO DE PROPS EXTERNAS
+      // ============================================================================
+      if (!onTasksChange || !onAddDailyLog) {
+        console.error('[handleSave] Props obrigatórias ausentes:', { onTasksChange: !!onTasksChange, onAddDailyLog: !!onAddDailyLog });
+        toast.error('Erro interno: Funções de callback não foram fornecidas pelo componente pai.');
+        return;
+      }
+
+      console.log('[handleSave] Iniciando fluxo de salvamento...');
+
+      if (!canFinalize()) {
+        setFeedbackMessage({ type: 'error', text: `Preencha as abas obrigatórias: ${getMissingTabs().join(', ')}` });
+        setShowFeedbackModal(true);
+        setActiveTabLocal('geral');
+        return;
+      }
+
+      const logAdvancements = Object.entries(advancements).map(([taskId, data]) => ({
         tarefaId: taskId,
         quantidade: Number(data.quantity) || 0,
         observacaoTarefa: data.notes,
         custoExtra: Number(data.extraCost) || 0
-      })).filter(a => a.quantidade > 0 || a.custoExtra > 0);
+      }));
 
-    if (logAdvancements.length === 0 && !globalObservations) {
-      alert('Preencha os avanços, custos ou observações antes de finalizar.');
-      return;
-    }
+      let finalTasks = tasks.map((task) => {
+        const adv = logAdvancements.find((a) => a.tarefaId === task.id);
+        if (!adv) return task;
+        const novoRealizado = Math.min(task.qtdPlanejada, task.qtdRealizada + adv.quantidade);
+        return { 
+          ...task, 
+          qtdRealizada: novoRealizado,
+          custoRealizado: (task.custoRealizado || 0) + (adv.custoExtra || 0)
+        };
+      });
 
-    let baseTasks = tasks;
-    if (editingLogId) {
-      const oldLog = dailyLogs.find(l => l.id === editingLogId);
-      if (oldLog) {
-        baseTasks = tasks.map(t => {
-          const adv = oldLog.avancos.find(a => a.tarefaId === t.id);
-          return adv ? { ...t, qtdRealizada: Math.max(0, t.qtdRealizada - adv.quantidade) } : t;
-        });
-        onRemoveDailyLog(editingLogId);
-      }
-    }
+      let cascataAplicada = false;
 
-    const updatedTasks = baseTasks.map(t => {
-      const adv = logAdvancements.find(a => a.tarefaId === t.id);
-      return adv ? { ...t, qtdRealizada: Math.min(t.qtdRealizada + adv.quantidade, t.qtdPlanejada), inicioReal: t.inicioReal || selectedDate } : t;
-    });
+      // ============================================================================
+      // DETECÇÃO DE IMPEDIMENTOS E EFEITO CASCATA
+      // ============================================================================
+      if (impediments.length > 0) {
+        const confirmarCascata = window.confirm(
+          'Foram registrados impedimentos neste RDO.\n\n' +
+          'Deseja aplicar o efeito cascata para adiar automaticamente o término das tarefas ativas e suas sucessoras em 1 dia útil?'
+        );
 
-    // Lógica de Confirmação (Efeito Cascata)
-    let aplicouCascata = false;
-    let finalTasks = updatedTasks;
-    
-    if (impediments.length > 0) {
-      aplicouCascata = window.confirm('Deseja que este impedimento adie o término das tarefas ativas e suas sucessoras em 1 dia (Efeito Cascata)?');
-      
-      // Se cascata foi aplicada, atualizar as datas das tarefas
-      if (aplicouCascata) {
-        // Encontrar tarefas ativas no dia de hoje (que serão impactadas)
-        const impactedTaskIndices: number[] = [];
-        finalTasks.forEach((task, idx) => {
-          const taskStart = new Date(task.inicioPlanejado + 'T00:00:00');
-          const taskEnd = new Date(task.fimPlanejado + 'T00:00:00');
-          const logDate = new Date(selectedDate + 'T00:00:00');
+        if (confirmarCascata) {
+          console.log('[handleSave] Iniciando efeito cascata...');
           
-          // Se a tarefa está ativa no dia do impedimento
-          if (taskStart <= logDate && logDate <= taskEnd) {
-            impactedTaskIndices.push(idx);
-          }
-        });
-        
-        // Atualizar PRIMEIRO a data final da tarefa impactada (+1 dia útil)
-        impactedTaskIndices.forEach(idx => {
-          const task = finalTasks[idx];
-          const newEnd = addWorkDays(task.fimPlanejado, 1);
-          finalTasks[idx] = {
-            ...finalTasks[idx],
-            fimPlanejado: newEnd
-          };
-        });
-        
-        // DEPOIS aplicar cascata para cada tarefa impactada (afetando sucessoras)
-        impactedTaskIndices.forEach(idx => {
-          finalTasks = applyCascade(finalTasks, idx);
-        });
+          // Identificar tarefas ativas na data selecionada
+          const activeTasks = finalTasks.filter(task => {
+            const taskStart = new Date(task.inicioPlanejado + 'T00:00:00');
+            const taskEnd = new Date(task.fimPlanejado + 'T00:00:00');
+            const logDate = new Date(selectedDate + 'T00:00:00');
+            return logDate >= taskStart && logDate <= taskEnd;
+          });
+
+          console.log('[handleSave] Tarefas ativas encontradas:', activeTasks.length);
+
+          // Aplicar adiamento de 1 dia útil para cada tarefa ativa
+          activeTasks.forEach(task => {
+            const newEndDate = addWorkDays(task.fimPlanejado, 1);
+            
+            finalTasks = finalTasks.map(t => 
+              t.id === task.id 
+                ? { ...t, fimPlanejado: newEndDate }
+                : t
+            );
+
+            // Aplicar cascata recursiva para sucessores com proteção contra loops
+            finalTasks = applyCascade(finalTasks, task.id, newEndDate, new Set());
+          });
+
+          cascataAplicada = true;
+          console.log('[handleSave] Efeito cascata concluído');
+        }
       }
+
+      const newLog: DailyLog = {
+        id: editingLogId || `log-${Date.now()}`,
+        tenantId: project?.tenantId || tenant.id,
+        obraId: selectedProjectId || '',
+        data: selectedDate,
+        usuarioId: user.id,
+        observacoes: `[MANHÃ: ${weatherMorning} | TARDE: ${weatherAfternoon}] ${globalObservations}`,
+        avancos: logAdvancements,
+        fotos: photosUrls,  // Usar URLs ao invés de base64
+        impedimentos: impediments,
+        aplicouCascata: cascataAplicada
+      };
+
+      console.log('[handleSave] Chamando onTasksChange com', finalTasks.length, 'tarefas');
+      onTasksChange(finalTasks);
+
+      console.log('[handleSave] Chamando onAddDailyLog');
+      onAddDailyLog(newLog);
+
+      console.log('[handleSave] Resetando formulário');
+      resetForm();
+      
+      setFeedbackMessage({
+        type: 'success',
+        text: editingLogId ? 'RDO Atualizado com Sucesso!' : 'RDO Consolidado com Sucesso! 🎉'
+      });
+      setShowFeedbackModal(true);
+      
+      console.log('[handleSave] Retornando à aba geral');
+      setActiveTabLocal('geral');
+
+      console.log('[handleSave] Fluxo de salvamento concluído com sucesso');
+    } catch (error) {
+      console.error('[handleSave] Erro durante o salvamento:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? `Erro interno: ${error.message}` 
+        : 'Erro interno ao salvar o RDO. Verifique o console para mais detalhes.';
+      
+      setFeedbackMessage({
+        type: 'error',
+        text: errorMessage
+      });
+      setShowFeedbackModal(true);
     }
+  };
 
-    const newLog: DailyLog = {
-      id: editingLogId || `log-${Date.now()}`,
-      tenantId: project.tenantId,
-      obraId: selectedProjectId,
-      data: selectedDate,
-      usuarioId: user.id,
-      observacoes: `[MANHÃ: ${weatherMorning} | TARDE: ${weatherAfternoon}] ${globalObservations}`,
-      avancos: logAdvancements,
-      fotos: photos,
-      impedimentos: impediments,
-      aplicouCascata: aplicouCascata
-    };
+  const handleEdit = (log: DailyLog) => {
+    setEditingLogId(log.id);
+    setSelectedProjectId(log.obraId);
+    setSelectedDate(log.data);
+    const weather = getWeatherInfo(log.observacoes);
+    if (weather) {
+      setWeatherMorning(weather.morning as WeatherCondition);
+      setWeatherAfternoon(weather.afternoon as WeatherCondition);
+    }
+    setGlobalObservations(log.observacoes.replace(/\[MANHÃ: .*? \| TARDE: .*?\]\s*/, ''));
+    setPhotosUrls(log.fotos || []);  // Usar URLs ao invés de base64
+    setImpediments((log as any).impedimentos || []);
 
-    onTasksChange(finalTasks);
-    onAddDailyLog(newLog);
-    resetForm();
-    alert(editingLogId ? 'RDO Atualizado!' : 'RDO Consolidado com sucesso!');
+    const advMap: Record<string, { quantity: string; notes: string; extraCost: string }> = {};
+    log.avancos.forEach((av) => {
+      advMap[av.tarefaId] = {
+        quantity: av.quantidade?.toString() || '',
+        notes: av.observacaoTarefa || '',
+        extraCost: av.custoExtra?.toString() || ''
+      };
+    });
+    setAdvancements(advMap);
+    setActiveTabLocal('geral');
+    setShowHistory(false);
+    setIsValidated(false);
+  };
+
+  const handleDelete = (id: string) => {
+    onRemoveDailyLog(id);
   };
 
   const generatePDF = async (log: DailyLog) => {
@@ -513,7 +667,22 @@ const DiarioView: React.FC<DiarioViewProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto pb-20 animate-in fade-in duration-700 font-['Inter'] relative">
+    <>
+      {/* Empty State quando nenhuma obra selecionada */}
+      {!project ? (
+        <div className="animate-in fade-in duration-700">
+          <EmptyProjectState
+            title="Nenhuma Obra Selecionada"
+            message="Selecione uma obra no menu Projetos para visualizar e registrar o Relatório Diário de Obra (RDO)."
+            primaryAction={{
+              label: 'Ir para Projetos',
+              onClick: () => setActiveTabProp?.('obras')
+            }}
+            onNavigateToDashboard={() => setActiveTabProp?.('obras')}
+          />
+        </div>
+      ) : (
+      <div className="max-w-5xl mx-auto pb-20 animate-in fade-in duration-700 font-['Inter'] relative">
       
       {/* 
           ======================================================================
@@ -757,7 +926,9 @@ const DiarioView: React.FC<DiarioViewProps> = ({
         )}
       </div>
 
-      {/* Interface Visual do Diário */}
+      {/* ============================================================================ */}
+      {/* NOVO: Sistema de Abas (Tabs) com Indicadores de Conclusão */}
+      {/* ============================================================================ */}
       <div className="flex justify-between items-center mb-10 print:hidden">
         <h1 className="text-3xl font-black text-[#0f172a] uppercase tracking-tighter">Lançamento de RDO</h1>
         <div className="flex gap-3">
@@ -771,61 +942,171 @@ const DiarioView: React.FC<DiarioViewProps> = ({
         </div>
       </div>
 
-      <div ref={reportRef} className="space-y-8 print:p-0">
-        <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
-          <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
-            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">00. Identificação e Clima</h3>
-          </div>
-          <div className="p-8 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-            <div className="md:col-span-5 space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Projeto Relacionado</label>
-              <select 
-                value={selectedProjectId || ''} 
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-[11px] font-black uppercase outline-none appearance-none cursor-pointer focus:ring-4 focus:ring-blue-50 transition-all"
+      {/* Tab Navigation */}
+      <div className="mb-8 print:hidden">
+        <div className="flex gap-4 border-b border-slate-100 pb-4 flex-wrap">
+          {([
+            { id: 'geral', label: 'Geral', icon: Building2 },
+            { id: 'producao', label: 'Produção', icon: Briefcase },
+            { id: 'ocorrencias', label: 'Ocorrências', icon: AlertTriangle },
+            { id: 'evidencias', label: 'Evidências', icon: Camera }
+          ] as { id: TabType, label: string, icon: any }[]).map(tab => {
+            const isActive = activeTabLocal === tab.id;
+            const isComplete = isTabComplete(tab.id);
+            const canAccess = canAccessTab(tab.id);
+            const IconComponent = tab.icon;
+            
+            return (
+              <motion.button
+                key={tab.id}
+                onClick={() => canAccess && setActiveTabLocal(tab.id)}
+                disabled={!canAccess}
+                className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[11px] uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed relative ${
+                  isActive 
+                    ? 'bg-blue-50 border-2 border-blue-500 text-blue-700 shadow-md shadow-blue-100' 
+                    : 'border border-slate-200 text-slate-500 hover:border-slate-300'
+                }`}
+                whileHover={canAccess ? { scale: 1.05 } : {}}
+                whileTap={canAccess ? { scale: 0.95 } : {}}
               >
-                {projects.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-              </select>
-            </div>
-            <div className="md:col-span-3 space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Data de Referência</label>
-              <input 
-                type="date" 
-                value={selectedDate} 
-                max={new Date().toISOString().split('T')[0]}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-[11px] font-black outline-none focus:ring-4 focus:ring-blue-50 transition-all" 
-              />
-            </div>
-            <div className="md:col-span-4 flex flex-col gap-4 border-l border-slate-50 pl-8">
-              {['Manhã', 'Tarde'].map((period) => (
-                <div key={period} className="flex items-center justify-between gap-4">
-                  <span className="text-[9px] font-black text-slate-400 uppercase w-12">{period}</span>
-                  <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 gap-1">
-                    {weatherOptions.map((opt) => {
-                      const isActive = (period === 'Manhã' ? weatherMorning : weatherAfternoon) === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          onClick={() => period === 'Manhã' ? setWeatherMorning(opt.id as WeatherCondition) : setWeatherAfternoon(opt.id as WeatherCondition)}
-                          className={`p-1.5 rounded-lg transition-all ${isActive ? 'bg-white text-blue-600 shadow-sm scale-110' : 'text-slate-300 hover:text-slate-500'}`}
-                        >
-                          {getWeatherIcon(opt.id as WeatherCondition)}
-                        </button>
-                      );
-                    })}
+                <IconComponent size={16} />
+                {tab.label}
+                {isComplete && <CheckCircle2 size={16} className="text-emerald-500" />}
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div ref={reportRef} className="print:p-0">
+        {/* ===== ABAS COM ANIMAÇÃO CONSOLIDADA ===== */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key="geral-tab"
+            initial={false}
+            animate={activeTabLocal === 'geral' ? { opacity: 1, y: 0, pointerEvents: 'auto', display: 'block' } : { opacity: 0, y: 10, pointerEvents: 'none', display: 'none' }}
+            transition={{ duration: 0.2 }}
+            className="space-y-8"
+          >
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Identificação do Projeto</h3>
+                </div>
+                <div className="p-8 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+                  <div className="md:col-span-5 space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Projeto Relacionado</label>
+                    <select 
+                      value={selectedProjectId || ''} 
+                      onChange={(e) => setSelectedProjectId(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-[11px] font-black uppercase outline-none appearance-none cursor-pointer focus:ring-4 focus:ring-blue-50 transition-all"
+                    >
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                    </select>
+                  </div>
+                  <div className="md:col-span-3 space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Data de Referência</label>
+                    <input 
+                      type="date" 
+                      value={selectedDate} 
+                      max={new Date().toISOString().split('T')[0]}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-[11px] font-black outline-none focus:ring-4 focus:ring-blue-50 transition-all" 
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
+              </div>
 
-        <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
-          <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
-            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">03. Produção e Avanço Físico</h3>
-          </div>
-          <div className="p-8 space-y-8">
+              {/* NOVO: Weather Cards Interativos */}
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Condições Climáticas</h3>
+                </div>
+                <div className="p-8 space-y-6">
+                  {['Manhã', 'Tarde'].map((period) => {
+                    const currentWeather = period === 'Manhã' ? weatherMorning : weatherAfternoon;
+                    
+                    return (
+                      <div key={period}>
+                        <label className="text-[11px] font-black text-slate-600 uppercase tracking-widest block mb-4">{period}</label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {weatherOptions.map((opt) => {
+                            const isSelected = currentWeather === opt.id;
+                            const IconComponent = opt.icon;
+                            const colorMap: Record<string, string> = {
+                              'SOL': 'from-yellow-50 to-amber-50 border-amber-200 shadow-amber-100',
+                              'NUBLADO': 'from-slate-50 to-slate-100 border-slate-200 shadow-slate-100',
+                              'CHUVA': 'from-blue-50 to-cyan-50 border-blue-200 shadow-blue-100',
+                              'IMPEDIDO': 'from-red-50 to-rose-50 border-red-200 shadow-red-100'
+                            };
+                            const glowMap: Record<string, string> = {
+                              'SOL': 'bg-amber-500/20',
+                              'NUBLADO': 'bg-slate-400/20',
+                              'CHUVA': 'bg-blue-500/20',
+                              'IMPEDIDO': 'bg-red-500/20'
+                            };
+
+                            return (
+                              <motion.button
+                                key={opt.id}
+                                onClick={() => period === 'Manhã' ? setWeatherMorning(opt.id as WeatherCondition) : setWeatherAfternoon(opt.id as WeatherCondition)}
+                                className={`relative p-6 rounded-[24px] border-2 transition-all group ${
+                                  isSelected 
+                                    ? `bg-gradient-to-br ${colorMap[opt.id]} border-2 shadow-xl ${glowMap[opt.id]}` 
+                                    : 'bg-white border-slate-100 hover:border-slate-200'
+                                }`}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                              >
+                                <div className="flex flex-col items-center justify-center">
+                                  <motion.div
+                                    initial={{ scale: 1 }}
+                                    animate={isSelected ? { scale: 1.2 } : { scale: 1 }}
+                                    transition={{ type: 'spring', damping: 10 }}
+                                  >
+                                    <IconComponent 
+                                      size={32} 
+                                      className={`transition-colors ${
+                                        isSelected 
+                                          ? opt.id === 'SOL' ? 'text-amber-600' : opt.id === 'NUBLADO' ? 'text-slate-600' : opt.id === 'CHUVA' ? 'text-blue-600' : 'text-red-600'
+                                          : 'text-slate-300 group-hover:text-slate-400'
+                                      }`}
+                                    />
+                                  </motion.div>
+                                  <span className="text-[11px] font-black text-slate-600 mt-3 uppercase tracking-tight">{opt.label}</span>
+                                  {isSelected && (
+                                    <motion.div
+                                      layoutId={`weather-check-${period}`}
+                                      initial={{ scale: 0 }}
+                                      animate={{ scale: 1 }}
+                                      className="absolute top-2 right-2 bg-emerald-500 text-white p-1 rounded-full"
+                                    >
+                                      <CheckCircle2 size={16} />
+                                    </motion.div>
+                                  )}
+                                </div>
+                              </motion.button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.div>
+
+          <motion.div
+            key="producao-tab"
+            initial={false}
+            animate={activeTabLocal === 'producao' ? { opacity: 1, y: 0, pointerEvents: 'auto', display: 'block' } : { opacity: 0, y: 10, pointerEvents: 'none', display: 'none' }}
+            transition={{ duration: 0.2 }}
+          >
+              <div className="space-y-8">
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Produção e Avanço Físico</h3>
+                </div>
+                <div className="p-8 space-y-8">
             {availableTasks.length === 0 ? (
                <div className="flex flex-col items-center justify-center py-10 text-slate-300 border-2 border-dashed border-slate-100 rounded-[32px]">
                   <Briefcase size={32} className="mb-2 opacity-20" />
@@ -870,67 +1151,61 @@ const DiarioView: React.FC<DiarioViewProps> = ({
                 );
               })
             )}
-          </div>
-        </div>
+                </div>
+              </div>
+              </div>
+            </motion.div>
 
-        <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
-          <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
-            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">04. Impedimentos e Paradas</h3>
-            <button onClick={() => setImpediments([...impediments, { motivo: '', horasPerdidas: 0, detalhamento: '' }])} className="text-[10px] font-black text-red-400 uppercase flex items-center gap-2 hover:text-red-300 transition-colors">
-              <Plus size={14} /> Nova Parada
-            </button>
-          </div>
-          <div className="p-8">
-            {impediments.length === 0 ? (
-              <p className="text-center text-slate-300 text-[10px] font-bold uppercase py-2">Nenhum impedimento registrado.</p>
-            ) : (
-              <div className="space-y-6">
-                {impediments.map((imp, i) => {
-                  const motivos = [
-                    'Falta de Materiais',
-                    'Condições Climáticas',
-                    'Falta de Mão de Obra',
-                    'Problemas Técnicos',
-                    'Erro de Projeto',
-                    'Atraso de Fornecedor',
-                    '+ CADASTRAR NOVO MOTIVO...'
-                  ];
-                  
-                  return (
-                    <div key={i} className="bg-red-50/30 p-6 rounded-[24px] border border-red-200 space-y-4 animate-in slide-in-from-left-2">
-                      <div className="flex items-start gap-4">
-                        <AlertTriangle className="text-red-400 mt-2 flex-shrink-0" size={20} />
-                        <div className="flex-1 space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* MOTIVO */}
-                            <div className="space-y-2">
-                              <label className="text-[9px] font-black text-red-700 uppercase tracking-widest px-1">Motivo da Interrupção</label>
+          <motion.div
+            key="ocorrencias-tab"
+            initial={false}
+            animate={activeTabLocal === 'ocorrencias' ? { opacity: 1, y: 0, pointerEvents: 'auto', display: 'block' } : { opacity: 0, y: 10, pointerEvents: 'none', display: 'none' }}
+            transition={{ duration: 0.2 }}
+          >
+              <div className="space-y-8">
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4 flex items-center justify-between">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Impedimentos e Paradas</h3>
+                  <button onClick={() => setImpediments([...impediments, { motivo: '', horasPerdidas: 0, detalhamento: '' }])} className="text-[10px] font-black text-red-400 uppercase flex items-center gap-2 hover:text-red-300 transition-colors">
+                    <Plus size={14} /> Nova Parada
+                  </button>
+                </div>
+                <div className="p-8">
+                  {impediments.length === 0 ? (
+                    <p className="text-center text-slate-300 text-[10px] font-bold uppercase py-2">Nenhum impedimento registrado.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {impediments.map((imp, i) => {
+                        return (
+                          <div key={i} className="bg-red-50/50 p-4 rounded-[20px] border border-red-100 flex items-center gap-3 animate-in slide-in-from-left-2">
+                            <AlertTriangle className="text-red-500 flex-shrink-0" size={18} />
+                            
+                            {/* Motivo (Searchable Select) */}
+                            <div className="flex-1">
+                              <div className="text-[9px] font-black text-red-600 uppercase tracking-widest px-2 mb-1">Motivo</div>
                               <select 
                                 value={imp.motivo} 
                                 onChange={(e) => {
-                                  if (e.target.value === '+ CADASTRAR NOVO MOTIVO...') {
-                                    const novoMotivo = window.prompt('Digite o novo motivo:');
-                                    if (novoMotivo) {
-                                      const newI = [...impediments];
-                                      newI[i].motivo = novoMotivo;
-                                      setImpediments(newI);
-                                    }
+                                  if (e.target.value === '+ NOVO MOTIVO') {
+                                    handleOpenMotivModal(i);
+                                    setTimeout(() => motivInputRef?.focus(), 0);
                                   } else {
                                     const newI = [...impediments];
                                     newI[i].motivo = e.target.value;
                                     setImpediments(newI);
                                   }
                                 }}
-                                className="w-full bg-white border border-red-200 px-4 py-3 rounded-2xl text-[11px] font-bold outline-none appearance-none focus:ring-2 focus:ring-red-300 transition-all cursor-pointer"
+                                className="w-full bg-white border border-red-200 px-3 py-2 rounded-lg text-[10px] font-bold outline-none focus:ring-2 focus:ring-red-300 transition-all cursor-pointer"
                               >
                                 <option value="">Selecione...</option>
-                                {motivos.map(m => <option key={m} value={m}>{m}</option>)}
+                                {motivosList.map(m => <option key={m} value={m}>{m}</option>)}
+                                <option value="+ NOVO MOTIVO" className="font-black text-red-500">+ NOVO MOTIVO</option>
                               </select>
                             </div>
 
-                            {/* HORAS PERDIDAS */}
-                            <div className="space-y-2">
-                              <label className="text-[9px] font-black text-red-700 uppercase tracking-widest px-1">Horas Perdidas</label>
+                            {/* Horas Perdidas */}
+                            <div className="w-24">
+                              <div className="text-[9px] font-black text-red-600 uppercase tracking-widest px-2 mb-1">Horas</div>
                               <input 
                                 type="number" 
                                 value={imp.horasPerdidas} 
@@ -940,13 +1215,13 @@ const DiarioView: React.FC<DiarioViewProps> = ({
                                   setImpediments(newI);
                                 }}
                                 placeholder="0" 
-                                className="w-full bg-white border border-red-200 px-4 py-3 rounded-2xl text-[11px] font-bold outline-none focus:ring-2 focus:ring-red-300 transition-all" 
+                                className="w-full bg-white border border-red-200 px-2 py-2 rounded-lg text-[10px] font-bold outline-none focus:ring-2 focus:ring-red-300 transition-all text-center" 
                               />
                             </div>
 
-                            {/* DETALHAMENTO */}
-                            <div className="space-y-2">
-                              <label className="text-[9px] font-black text-red-700 uppercase tracking-widest px-1">Detalhamento</label>
+                            {/* Detalhamento */}
+                            <div className="flex-1">
+                              <div className="text-[9px] font-black text-red-600 uppercase tracking-widest px-2 mb-1">Detalhe</div>
                               <input 
                                 type="text" 
                                 value={imp.detalhamento} 
@@ -955,102 +1230,348 @@ const DiarioView: React.FC<DiarioViewProps> = ({
                                   newI[i].detalhamento = e.target.value;
                                   setImpediments(newI);
                                 }}
-                                placeholder="Detalhe o impedimento..." 
-                                className="w-full bg-white border border-red-200 px-4 py-3 rounded-2xl text-[11px] font-bold outline-none focus:ring-2 focus:ring-red-300 transition-all" 
+                                placeholder="Descrição..." 
+                                className="w-full bg-white border border-red-200 px-3 py-2 rounded-lg text-[10px] font-bold outline-none focus:ring-2 focus:ring-red-300 transition-all" 
                               />
                             </div>
+
+                            {/* Botão Remover */}
+                            <button 
+                              onClick={() => setImpediments(impediments.filter((_, idx) => idx !== i))} 
+                              className="text-red-400 hover:text-red-600 hover:bg-red-100 p-2 rounded-lg transition-colors flex-shrink-0"
+                            >
+                              <X size={16} />
+                            </button>
                           </div>
-                        </div>
-                        <button 
-                          onClick={() => setImpediments(impediments.filter((_, idx) => idx !== i))} 
-                          className="text-red-400 hover:text-red-600 hover:bg-red-100 p-2 rounded-xl transition-colors flex-shrink-0"
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
-          <div className="bg-[#0f172a] px-8 py-4 text-white">
-            <h3 className="text-[11px] font-black uppercase tracking-[0.3em]">05. Evidências e Notas Finais</h3>
-          </div>
-          <div className="p-10 space-y-10">
-            <textarea value={globalObservations} onChange={e => setGlobalObservations(e.target.value)} placeholder="RESUMO DO DIA..." className="w-full h-48 bg-slate-50 border border-slate-100 p-8 rounded-[40px] text-[14px] font-medium outline-none shadow-inner" />
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
-              {photos.map((p, i) => (
-                <div key={i} className="aspect-square bg-slate-100 rounded-[32px] overflow-hidden relative group border border-slate-200 cursor-zoom-in shadow-sm">
-                  <img src={p} className="w-full h-full object-cover" onClick={() => setLightboxPhoto(p)} />
-                  <button onClick={(e) => { e.stopPropagation(); setPhotos(photos.filter((_, idx) => idx !== i)); }} className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
-                </div>
-              ))}
-              <label className="aspect-square rounded-[32px] border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center cursor-pointer hover:bg-blue-50 transition-all shadow-sm group">
-                <Camera size={24} className="text-slate-300 group-hover:text-blue-500" />
-                <input type="file" multiple accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative overflow-hidden rounded-[32px]">
-          <div className={`p-6 border transition-all duration-700 flex flex-col md:flex-row items-center justify-between gap-6 ${!hasDigitalSignature ? 'blur-md grayscale' : (isValidated ? 'bg-emerald-600 border-emerald-500 shadow-xl shadow-emerald-100' : 'bg-[#0f172a] border-slate-800 shadow-lg')}`}>
-            <div className="flex items-center gap-5">
-              <button 
-                onClick={() => hasDigitalSignature && setIsValidated(!isValidated)}
-                className={`w-16 h-16 rounded-[24px] flex items-center justify-center transition-all active:scale-90 shadow-xl ${isValidated ? 'bg-white text-emerald-600' : 'bg-slate-800 text-slate-500 hover:text-blue-400'}`}
-              >
-                <CheckCircle2 size={32} />
-              </button>
-              <div className="text-left flex-1">
-                <h4 className="text-xl font-black text-white uppercase tracking-tighter">Validação Técnica</h4>
-                <div className="flex items-center gap-4 flex-wrap">
-                  <p className={`text-[10px] font-bold mt-1 ${isValidated ? 'text-emerald-100' : 'text-slate-500'}`}>
-                    Eu, <span className="underline decoration-2 text-blue-400 font-black">{user.nome}</span>, atesto a veracidade dos registros.
-                  </p>
-                  {isValidated && user.signatureUrl && (
-                    <div className="bg-white/10 p-2 rounded-xl border border-white/5 backdrop-blur-sm animate-in fade-in slide-in-from-left-4">
-                      <img src={user.signatureUrl} alt="Assinatura Digital" className="h-12 object-contain grayscale brightness-200 invert" />
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               </div>
-            </div>
-            
-            <div className="flex items-center gap-4 w-full md:w-auto">
-              <button 
-                disabled={!isValidated || !hasDigitalSignature} 
-                onClick={handleSave}
-                className={`flex-1 md:flex-initial px-10 py-5 rounded-[24px] text-[12px] font-black uppercase tracking-[0.1em] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3 ${isValidated ? 'bg-white text-emerald-600 hover:scale-[1.03]' : 'bg-slate-800 text-slate-700 cursor-not-allowed'}`}
-              >
-                {editingLogId ? <><Edit2 size={16}/> Salvar Alterações</> : <><Save size={16}/> Finalizar RDO</>}
-              </button>
-            </div>
-          </div>
 
-          {!hasDigitalSignature && (
-            <div className="absolute inset-0 bg-white/40 z-10 flex flex-col items-center justify-center text-center p-10">
-               <div className="w-14 h-14 bg-amber-500 text-white rounded-2xl flex items-center justify-center shadow-xl mb-4">
-                 <Lock size={28} fill="currentColor" />
-               </div>
-               <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-1">Validação e Assinatura</h4>
-               <p className="text-[10px] text-slate-500 font-bold uppercase mb-6">Bloqueado para o plano atual.</p>
-               <button 
-                 onClick={onOpenUpgrade}
-                 className="px-6 py-3 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg hover:bg-blue-700 transition-all active:scale-95"
-               >
-                 Liberar Assinatura Digital
-               </button>
+              {/* Notas Gerais */}
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Notas Gerais e Observações</h3>
+                </div>
+                <div className="p-8">
+                  <textarea value={globalObservations} onChange={e => setGlobalObservations(e.target.value)} placeholder="RESUMO DO DIA..." className="w-full h-48 bg-slate-50 border border-slate-100 p-8 rounded-[40px] text-[14px] font-medium outline-none shadow-inner" />
+                </div>
+              </div>
+              </div>
+            </motion.div>
+
+          <motion.div
+            key="evidencias-tab"
+            initial={false}
+            animate={activeTabLocal === 'evidencias' ? { opacity: 1, y: 0, pointerEvents: 'auto', display: 'block' } : { opacity: 0, y: 10, pointerEvents: 'none', display: 'none' }}
+            transition={{ duration: 0.2 }}
+          >
+              <div className="space-y-8">
+              <div className="bg-white rounded-[32px] border border-slate-100 overflow-hidden shadow-sm">
+                <div className="bg-[#0f172a] px-8 py-4">
+                  <h3 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Evidências Fotográficas</h3>
+                </div>
+                <div className="p-10">
+                  {/* Uploader Component */}
+                  <div className="mb-8">
+                    <ImageUploader
+                      entityId={selectedProjectId || 'temp'}
+                      tenantId={tenant.id}
+                      bucket="fotos-obra"
+                      label="Adicionar Foto (Obra)"
+                      onUploadSuccess={handlePhotoUpload}
+                      maxSizeMB={10}
+                    />
+                  </div>
+
+                  {/* Galeria de Fotos */}
+                  <div className="space-y-4">
+                    {photosUrls.length > 0 && (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-slate-700">{photosUrls.length} foto{photosUrls.length !== 1 ? 's' : ''} adicionada{photosUrls.length !== 1 ? 's' : ''}</p>
+                          <button
+                            onClick={() => setPreviewPhotosOpen(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl transition-colors text-sm font-medium"
+                          >
+                            <Eye size={16} />
+                            Visualizar Galeria
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+                          {photosUrls.map((url, i) => (
+                            <div key={i} className="aspect-square bg-slate-100 rounded-[32px] overflow-hidden relative group border border-slate-200 cursor-pointer shadow-sm">
+                              <img 
+                                src={url} 
+                                alt={`Foto ${i + 1}`}
+                                className="w-full h-full object-cover" 
+                                onClick={() => setPreviewPhotosOpen(true)} 
+                              />
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleRemovePhoto(i); }} 
+                                className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all hover:bg-red-600"
+                                title="Remover foto"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              </div>
+
+              {/* Preview Modal */}
+              <ImagePreviewModal
+                isOpen={previewPhotosOpen}
+                images={photosUrls}
+                title="Fotos da Obra"
+                onClose={() => setPreviewPhotosOpen(false)}
+              />
+            </motion.div>
+
+        {/* ===== PAINEL DE ASSINATURA FLUTUANTE (APENAS NA ÚLTIMA ABA) ===== */}
+        {activeTabLocal === 'evidencias' && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={canFinalize() ? { y: 0, opacity: 1 } : { y: 100, opacity: 0 }}
+            transition={{ type: 'spring', damping: 20 }}
+            className="fixed bottom-6 right-6 print:hidden z-40"
+          >
+            <div className={`relative overflow-hidden rounded-[32px] shadow-2xl ${!hasDigitalSignature ? 'blur-md grayscale' : (isValidated ? 'bg-emerald-600 border border-emerald-500 shadow-emerald-200' : 'bg-slate-800 border border-slate-700')}`}>
+              <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center gap-5">
+                  <button 
+                    onClick={() => {
+                      if (!hasDigitalSignature) {
+                        onOpenUpgrade();
+                        return;
+                      }
+                      setIsValidated(!isValidated);
+                    }}
+                    className={`w-14 h-14 rounded-[20px] flex items-center justify-center transition-all active:scale-90 shadow-lg ${isValidated ? 'bg-white text-emerald-600' : 'bg-slate-700 text-slate-400 hover:text-emerald-400'}`}
+                  >
+                    <CheckCircle2 size={28} />
+                  </button>
+                  <div className="text-left">
+                    <h4 className="text-sm font-black text-white uppercase tracking-tighter">Validação</h4>
+                    <p className={`text-[10px] font-bold mt-0.5 ${isValidated ? 'text-emerald-100' : 'text-slate-400'}`}>
+                      Atestado de veracidade
+                    </p>
+                  </div>
+                </div>
+                
+                <ProtectedElement resource={PermissionResource.REPORTS} action={editingLogId ? Action.UPDATE : Action.CREATE}>
+                  <button 
+                    disabled={!isValidated || !hasDigitalSignature} 
+                    onClick={handleSave}
+                    className={`px-8 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-[0.1em] transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 ${isValidated ? 'bg-white text-emerald-600 hover:scale-105' : 'bg-slate-700 text-slate-600 cursor-not-allowed'}`}
+                  >
+                    {editingLogId ? <><Edit2 size={14}/> Salvar</> : <><Save size={14}/> Finalizar</>}
+                  </button>
+                </ProtectedElement>
+              </div>
+
+              {!hasDigitalSignature && (
+                <div className="absolute inset-0 bg-white/50 z-10 flex flex-col items-center justify-center text-center p-4">
+                  <Lock size={20} className="mb-1" />
+                  <p className="text-[8px] font-black text-slate-700">Bloqueado</p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </motion.div>
+        )}
+        </AnimatePresence>
+
       </div>
 
-      <section className="mt-24 pt-12 border-t border-slate-100">
+      {/* ===== MODAL DE NOVO MOTIVO ===== */}
+      <AnimatePresence>
+        {showMotivModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            onClick={() => {
+              setShowMotivModal(false);
+              setMotivInputValue('');
+              setPendingImpedimentIndex(null);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: -20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: -20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="bg-white rounded-[32px] shadow-2xl max-w-sm w-full p-8 border border-slate-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h4 className="text-[15px] font-black text-[#0f172a] uppercase tracking-tighter">Novo Motivo</h4>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">Digite o motivo de interrupção</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowMotivModal(false);
+                    setMotivInputValue('');
+                    setPendingImpedimentIndex(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Input */}
+              <div className="mb-6">
+                <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest block mb-2">Descrição do Motivo</label>
+                <input
+                  ref={(el) => {
+                    setMotivInputRef(el);
+                    if (el) el.focus();
+                  }}
+                  type="text"
+                  value={motivInputValue}
+                  onChange={(e) => setMotivInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddNewMotivo();
+                    if (e.key === 'Escape') {
+                      setShowMotivModal(false);
+                      setMotivInputValue('');
+                      setPendingImpedimentIndex(null);
+                    }
+                  }}
+                  placeholder="Ex: Falta de ferramental específico"
+                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-[12px] font-bold outline-none focus:bg-white focus:ring-2 focus:ring-red-300 transition-all"
+                  autoFocus
+                />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowMotivModal(false);
+                    setMotivInputValue('');
+                    setPendingImpedimentIndex(null);
+                  }}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-[10px] font-black text-slate-700 uppercase px-4 py-2.5 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleAddNewMotivo}
+                  className="flex-1 bg-red-500 hover:bg-red-600 text-[10px] font-black text-white uppercase px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus size={14} /> Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== MODAL DE FEEDBACK (SUCESSO/ERRO) ===== */}
+      <AnimatePresence>
+        {showFeedbackModal && feedbackMessage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"
+            onClick={() => setShowFeedbackModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: -40 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 40 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              className={`rounded-[40px] shadow-2xl max-w-md w-full p-10 text-center border ${
+                feedbackMessage.type === 'success' 
+                  ? 'bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200' 
+                  : 'bg-gradient-to-br from-red-50 to-rose-50 border-red-200'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {feedbackMessage.type === 'success' ? (
+                <>
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', damping: 10, delay: 0.1 }}
+                    className="mb-6 flex justify-center"
+                  >
+                    <div className="w-20 h-20 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-xl">
+                      <CheckCircle2 size={48} />
+                    </div>
+                  </motion.div>
+                  <h3 className="text-[20px] font-black text-emerald-700 uppercase tracking-tight mb-2">
+                    {feedbackMessage.text}
+                  </h3>
+                  <p className="text-[12px] text-emerald-600 font-bold mb-8">
+                    Seu RDO foi registrado com sucesso no sistema.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', damping: 10, delay: 0.1 }}
+                    className="mb-6 flex justify-center"
+                  >
+                    <div className="w-20 h-20 bg-red-500 text-white rounded-full flex items-center justify-center shadow-xl">
+                      <AlertTriangle size={48} />
+                    </div>
+                  </motion.div>
+                  <h3 className="text-[20px] font-black text-red-700 uppercase tracking-tight mb-2">
+                    Formulário Incompleto
+                  </h3>
+                  <p className="text-[12px] text-red-600 font-bold mb-6">
+                    {feedbackMessage.text}
+                  </p>
+                  <div className="space-y-2">
+                    {getMissingTabs().map((tab, i) => (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 + i * 0.05 }}
+                        className="px-4 py-2 bg-red-100 rounded-lg text-[11px] font-black text-red-700 uppercase"
+                      >
+                        ⚠️ {tab}
+                      </motion.div>
+                    ))}
+                  </div>
+                </>
+              )}
+              
+              <button
+                onClick={() => setShowFeedbackModal(false)}
+                className={`mt-8 w-full px-6 py-3 rounded-[20px] text-[12px] font-black uppercase tracking-[0.1em] transition-all shadow-lg active:scale-95 ${
+                  feedbackMessage.type === 'success'
+                    ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                    : 'bg-red-500 text-white hover:bg-red-600'
+                }`}
+              >
+                {feedbackMessage.type === 'success' ? 'Fechar' : 'Corrigir'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Seção de Histórico */}
+
+      <section className="mt-24 pt-12 border-t border-slate-100 mb-24">
         <div className="flex items-center justify-between mb-10 px-4">
           <div className="flex items-center gap-5">
              <div className="p-4 bg-blue-50 text-blue-600 rounded-[20px] shadow-sm"><History size={28} /></div>
@@ -1066,35 +1587,86 @@ const DiarioView: React.FC<DiarioViewProps> = ({
 
         <AnimatePresence>
           {showHistory && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="flex gap-8 overflow-x-auto pb-10 scrollbar-hide px-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: 20 }} 
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4"
+            >
               {timelineLogs.map((log) => {
                 const climate = getWeatherInfo(log.observacoes);
+                
+                // Mapear condições climáticas para cores
+                const getClimateColor = (condition: string) => {
+                  const colors: Record<string, string> = {
+                    'SOL': 'bg-amber-100 text-amber-700 border-amber-200',
+                    'NUBLADO': 'bg-slate-100 text-slate-600 border-slate-200',
+                    'CHUVA': 'bg-blue-100 text-blue-700 border-blue-200',
+                    'IMPEDIDO': 'bg-red-100 text-red-700 border-red-200'
+                  };
+                  return colors[condition] || 'bg-slate-100 text-slate-600 border-slate-200';
+                };
+
                 return (
-                  <div key={log.id} className="min-w-[360px] bg-white p-8 rounded-[40px] border border-slate-100 transition-all relative group border-l-[10px] border-l-blue-500 shadow-sm hover:shadow-md">
-                    <div className="flex justify-between items-start mb-8">
-                      <span className="px-5 py-2 bg-blue-50 text-blue-600 rounded-2xl text-[11px] font-black uppercase shadow-sm">{new Date(log.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                  <div key={log.id} className="bg-white p-6 rounded-[32px] border border-slate-100 transition-all relative group border-l-[6px] border-l-blue-500 shadow-sm hover:shadow-lg">
+                    <div className="flex justify-between items-start mb-6">
+                      <span className="px-4 py-2 bg-blue-50 text-blue-600 rounded-2xl text-[10px] font-black uppercase shadow-sm">
+                        {new Date(log.data + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      </span>
+                      <div className="flex gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
                          <button 
                             onClick={() => generatePDF(log)} 
                             disabled={isExporting && logToExport?.id === log.id}
-                            className={`p-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center ${isExporting && logToExport?.id === log.id ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-100'}`}
+                            className={`p-2 rounded-xl transition-all shadow-sm flex items-center justify-center ${isExporting && logToExport?.id === log.id ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                            title="Baixar PDF"
                          >
-                            {isExporting && logToExport?.id === log.id ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
+                            {isExporting && logToExport?.id === log.id ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
                          </button>
-                         <button onClick={() => handleEdit(log)} className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-100 rounded-xl transition-all"><Edit2 size={18} /></button>
-                         <button onClick={() => handleDelete(log.id)} className="p-2.5 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-white border border-transparent hover:border-slate-100 rounded-xl transition-all"><Trash2 size={18} /></button>
+                         <ProtectedElement resource={PermissionResource.REPORTS} action={Action.UPDATE}>
+                          <button 
+                            onClick={() => handleEdit(log)} 
+                            className="p-2 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                            title="Editar"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                         </ProtectedElement>
+                         <ProtectedElement resource={PermissionResource.REPORTS} action={Action.DELETE}>
+                          <button 
+                            onClick={() => handleDelete(log.id)} 
+                            className="p-2 bg-slate-50 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                            title="Excluir"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                         </ProtectedElement>
                       </div>
                     </div>
+                    
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between text-[13px] font-black uppercase">
-                        <p className="truncate max-w-[200px]">{log.usuarioId === user.id ? user.nome : 'Resp. Técnico'}</p>
-                        {climate && <div className="flex gap-2 text-[8px] bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">M: {climate.morning} T: {climate.afternoon}</div>}
+                      <div className="flex items-center justify-between">
+                        <p className="text-[12px] font-black text-[#0f172a] uppercase truncate max-w-[180px]">
+                          {log.usuarioId === user.id ? user.nome : 'Resp. Técnico'}
+                        </p>
+                        {climate && (
+                          <div className="flex gap-1.5">
+                            <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border ${getClimateColor(climate.morning)}`}>
+                              M: {climate.morning}
+                            </span>
+                            <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border ${getClimateColor(climate.afternoon)}`}>
+                              T: {climate.afternoon}
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <div className="p-5 bg-slate-50 rounded-[24px] text-[12px] font-medium text-slate-500 line-clamp-3 leading-relaxed border border-slate-100 shadow-inner italic">
+                      
+                      <div className="p-4 bg-slate-50 rounded-[20px] text-[11px] font-medium text-slate-600 line-clamp-3 leading-relaxed border border-slate-100 italic">
                         "{log.observacoes.replace(/\[MANHÃ: .*? \| TARDE: .*?\] /, '') || 'Sem observações.'}"
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-tighter px-1">
-                         <Layers size={12} className="text-blue-500" /> {log.avancos.length} ATIVIDADES REGISTRADAS
+                      
+                      <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-tight">
+                         <Layers size={12} className="text-blue-500" /> 
+                         <span>{log.avancos.length} atividade{log.avancos.length !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                   </div>
@@ -1111,8 +1683,8 @@ const DiarioView: React.FC<DiarioViewProps> = ({
            <img src={lightboxPhoto} className="max-w-full max-h-full object-contain rounded-[40px] shadow-2xl animate-in zoom-in-95" />
         </div>
       )}
-      
-    </div>
+      </div>
+      )}    </>
   );
 };
 
