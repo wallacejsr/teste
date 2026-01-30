@@ -222,6 +222,14 @@ const App: React.FC = () => {
       const isCtrlShiftJ = event.ctrlKey && event.shiftKey && key === 'j';
       const isCtrlShiftC = event.ctrlKey && event.shiftKey && key === 'c';
       if (isF12 || isCtrlShiftI || isCtrlShiftJ || isCtrlShiftC) {
+        const shortcut = isF12
+          ? 'Uso de tecla F12'
+          : isCtrlShiftI
+            ? 'Atalho Ctrl+Shift+I'
+            : isCtrlShiftJ
+              ? 'Atalho Ctrl+Shift+J'
+              : 'Atalho Ctrl+Shift+C';
+        dataSyncService.logSecurityEvent(shortcut, window.location.href);
         event.preventDefault();
         event.stopPropagation();
       }
@@ -235,6 +243,7 @@ const App: React.FC = () => {
       const heightDiff = Math.abs(window.outerHeight - window.innerHeight);
       const detected = widthDiff > threshold || heightDiff > threshold;
       if (detected) {
+        dataSyncService.logSecurityEvent('Abertura de Console/DevTools', window.location.href);
         debugger; // trap leve quando DevTools estiver aberto
       }
     };

@@ -45,6 +45,10 @@ class DataSyncService {
   private lastPermissionErrorTime: number = 0;
   private readonly PERMISSION_ERROR_DEBOUNCE = 3000; // 3 segundos
 
+  // Debounce para logs de segurança (5 minutos)
+  private securityLogDebounce: Map<string, number> = new Map();
+  private readonly SECURITY_LOG_DEBOUNCE = 5 * 60 * 1000;
+
   /**
    * Registrar callback para notificações de erro de permissão
    */
@@ -1299,6 +1303,56 @@ class DataSyncService {
    */
   async forceSyncQueue(): Promise<void> {
     await this.processPendingQueue();
+  }
+
+  /**
+   * Registrar evento de segurança (com debounce de 5 minutos)
+   */
+  async logSecurityEvent(eventType: string, context: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, skipping security log');
+      return false;
+    }
+
+    try {
+      const session = await authService.getSession();
+      const userId = session?.user?.id || null;
+      const tenantId = authService.getTenantIdFromSession(session);
+
+      if (!userId || !tenantId) {
+        console.warn('[DataSync] Missing userId/tenantId, skipping security log');
+        return false;
+      }
+
+      const key = `${userId}:${eventType}:${context}`;
+      const now = Date.now();
+      const last = this.securityLogDebounce.get(key) || 0;
+
+      if (now - last < this.SECURITY_LOG_DEBOUNCE) {
+        return false;
+      }
+
+      this.securityLogDebounce.set(key, now);
+
+      const { error } = await this.supabase
+        .from('security_logs')
+        .insert({
+          tenant_id: tenantId,
+          user_id: userId,
+          event_type: eventType,
+          context,
+        });
+
+      if (error) {
+        this.handleError(error, 'logSecurityEvent');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      this.handleError(error, 'logSecurityEvent');
+      return false;
+    }
   }
 
   /**

@@ -28,6 +28,15 @@ interface AuditLog {
   timestamp: string;
 }
 
+interface SecurityLog {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  event_type: string;
+  context: string;
+  created_at: string;
+}
+
 interface AuditStats {
   total: number;
   allowed: number;
@@ -38,8 +47,10 @@ interface AuditStats {
 }
 
 export const AuditView: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'permissions' | 'security'>('permissions');
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
+  const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
   const [stats, setStats] = useState<AuditStats>({
     total: 0,
     allowed: 0,
@@ -50,6 +61,8 @@ export const AuditView: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [securityLoading, setSecurityLoading] = useState(false);
+  const [securityError, setSecurityError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [filterResource, setFilterResource] = useState<string>('');
   const [filterAction, setFilterAction] = useState<string>('');
@@ -76,7 +89,10 @@ export const AuditView: React.FC = () => {
     if (!hasAuditAccess) return;
     
     loadAuditLogs();
-  }, [dateRange, permLoading, hasAuditAccess]);
+    if (isSuperAdmin) {
+      loadSecurityLogs();
+    }
+  }, [dateRange, permLoading, hasAuditAccess, isSuperAdmin]);
 
   // Aplicar filtros
   useEffect(() => {
@@ -129,6 +145,53 @@ export const AuditView: React.FC = () => {
       setError('Falha ao carregar logs de auditoria');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSecurityLogs = async () => {
+    if (!isSuperAdmin) {
+      setSecurityError('Acesso restrito a SUPERADMIN');
+      return;
+    }
+
+    setSecurityLoading(true);
+    setSecurityError(null);
+
+    try {
+      const supabase = dataSyncService.getSupabaseClient();
+      if (!supabase) {
+        throw new Error('Supabase client not initialized');
+      }
+
+      const now = new Date();
+      let startDate = new Date();
+
+      if (dateRange === '24h') {
+        startDate.setHours(startDate.getHours() - 24);
+      } else if (dateRange === '7d') {
+        startDate.setDate(startDate.getDate() - 7);
+      } else if (dateRange === '30d') {
+        startDate.setDate(startDate.getDate() - 30);
+      }
+
+      const { data, error: err } = await supabase
+        .from('security_logs')
+        .select('*')
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', now.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      if (err) {
+        throw err;
+      }
+
+      setSecurityLogs(data || []);
+    } catch (err) {
+      console.error('Erro ao carregar logs de segurança:', err);
+      setSecurityError('Falha ao carregar logs de segurança');
+    } finally {
+      setSecurityLoading(false);
     }
   };
 
@@ -214,6 +277,11 @@ export const AuditView: React.FC = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  const hasRecentSecurityAlerts = securityLogs.some((log) => {
+    const timestamp = new Date(log.created_at).getTime();
+    return Date.now() - timestamp <= 24 * 60 * 60 * 1000;
+  });
+
   const getResourceColor = (resource: string): string => {
     const colors: Record<string, string> = {
       projects: 'bg-blue-100 text-blue-800',
@@ -274,8 +342,43 @@ export const AuditView: React.FC = () => {
         <p className="text-gray-600">Monitore todas as ações de acesso e permissões do sistema</p>
       </div>
 
-      {/* Estatísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      {/* Tabs */}
+      <div className="mb-6">
+        <div className="inline-flex items-center rounded-xl bg-white shadow-sm border border-gray-200 p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab('permissions')}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition ${
+              activeTab === 'permissions'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Permissões
+          </button>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('security')}
+              className={`relative px-4 py-2 text-sm font-semibold rounded-lg transition ${
+                activeTab === 'security'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Segurança
+              {hasRecentSecurityAlerts && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {activeTab === 'permissions' && (
+        <>
+          {/* Estatísticas */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         {/* Card: Total */}
         <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
           <div className="flex items-center justify-between">
@@ -339,11 +442,11 @@ export const AuditView: React.FC = () => {
             <TrendingUp className="w-8 h-8 text-orange-200" />
           </div>
         </div>
-      </div>
+          </div>
 
-      {/* Filtros e Busca */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="flex items-center gap-4 flex-wrap">
+          {/* Filtros e Busca */}
+          <div className="bg-white rounded-lg shadow p-4 mb-6">
+            <div className="flex items-center gap-4 flex-wrap">
           {/* Busca */}
           <div className="flex-1 min-w-64 relative">
             <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
@@ -432,11 +535,11 @@ export const AuditView: React.FC = () => {
               Limpar Filtros
             </button>
           )}
-        </div>
-      </div>
+            </div>
+          </div>
 
-      {/* Tabela de Logs */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+          {/* Tabela de Logs */}
+          <div className="bg-white rounded-lg shadow overflow-hidden">
         {loading ? (
           <div className="p-8 text-center">
             <div className="inline-block">
@@ -588,7 +691,94 @@ export const AuditView: React.FC = () => {
             </div>
           </div>
         )}
-      </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'security' && !isSuperAdmin && (
+        <div className="bg-white rounded-lg shadow p-8 text-center">
+          <Shield className="w-12 h-12 mx-auto text-red-500 mb-3" />
+          <h3 className="text-xl font-bold text-gray-900 mb-2">Acesso Negado</h3>
+          <p className="text-gray-600">A aba de Segurança é exclusiva para SUPERADMIN.</p>
+        </div>
+      )}
+
+      {activeTab === 'security' && isSuperAdmin && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          {securityLoading ? (
+            <div className="p-8 text-center">
+              <div className="inline-block">
+                <div className="animate-spin">
+                  <Clock className="w-8 h-8 text-indigo-600" />
+                </div>
+              </div>
+              <p className="text-gray-600 mt-4">Carregando alertas de segurança...</p>
+            </div>
+          ) : securityError ? (
+            <div className="p-8 text-center">
+              <div className="text-red-600 mb-2">
+                <X className="w-8 h-8 mx-auto" />
+              </div>
+              <p className="text-gray-600">{securityError}</p>
+              <button
+                onClick={loadSecurityLogs}
+                className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                Tentar Novamente
+              </button>
+            </div>
+          ) : securityLogs.length === 0 ? (
+            <div className="p-8 text-center">
+              <Shield className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+              <p className="text-gray-600">Nenhum alerta de segurança nas últimas {stats.timeRange.toLowerCase()}</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      Data/Hora
+                    </th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      Usuário
+                    </th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      Tipo de Violação
+                    </th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">
+                      Contexto
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {securityLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-gray-50 transition">
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {new Date(log.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900 font-medium">
+                        {log.user_id?.substring(0, 8)}...
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600">
+                          {log.event_type || 'Alerta de Segurança'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {log.context || 'Contexto indisponível'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 text-sm text-gray-600">
+                Exibindo {securityLogs.length} alertas
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
