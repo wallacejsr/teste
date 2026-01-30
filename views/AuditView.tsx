@@ -32,6 +32,7 @@ interface SecurityLog {
   id: string;
   tenant_id: string;
   user_id: string;
+  user_name: string; // Nome do usuário (JOIN com users)
   event_type: string;
   context: string;
   created_at: string;
@@ -176,7 +177,12 @@ export const AuditView: React.FC = () => {
 
       const { data, error: err } = await supabase
         .from('security_logs')
-        .select('*')
+        .select(`
+          *,
+          users:user_id (
+            nome
+          )
+        `)
         .gte('created_at', startDate.toISOString())
         .lte('created_at', now.toISOString())
         .order('created_at', { ascending: false })
@@ -186,7 +192,13 @@ export const AuditView: React.FC = () => {
         throw err;
       }
 
-      setSecurityLogs(data || []);
+      // Processar dados para extrair nome do usuário com fallback
+      const processedLogs = (data || []).map((log: any) => ({
+        ...log,
+        user_name: log.users?.nome || 'Usuário Desconhecido'
+      }));
+
+      setSecurityLogs(processedLogs);
     } catch (err) {
       console.error('Erro ao carregar logs de segurança:', err);
       setSecurityError('Falha ao carregar logs de segurança');
@@ -757,8 +769,11 @@ export const AuditView: React.FC = () => {
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {new Date(log.created_at).toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-900 font-medium">
-                        {log.user_id?.substring(0, 8)}...
+                      <td 
+                        className="px-6 py-4 text-sm text-gray-900 font-medium"
+                        title={log.user_id}
+                      >
+                        {log.user_name}
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600">
