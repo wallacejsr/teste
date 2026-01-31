@@ -441,7 +441,6 @@ class AuthService {
 
     const { data: { subscription } } = this.supabase.auth.onAuthStateChange(
       (event, session) => {
-        console.log('[AuthService] Auth state changed:', event);
         this.currentSession = session;
         callback(event, session);
       }

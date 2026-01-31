@@ -19,6 +19,7 @@ import {
 interface AuditLog {
   id: string;
   user_id: string;
+  user_name: string; // Nome do usuário (JOIN com users)
   tenant_id: string;
   action: string;
   resource: string;
@@ -129,7 +130,12 @@ export const AuditView: React.FC = () => {
 
       const { data, error: err } = await supabase
         .from('permission_audit_log')
-        .select('*')
+        .select(`
+          *,
+          users:user_id (
+            nome
+          )
+        `)
         .gte('timestamp', startDate.toISOString())
         .lte('timestamp', now.toISOString())
         .order('timestamp', { ascending: false })
@@ -139,8 +145,14 @@ export const AuditView: React.FC = () => {
         throw err;
       }
 
-      setLogs(data || []);
-      calculateStats(data || []);
+      // Processar dados para extrair nome do usuário com fallback
+      const processedLogs = (data || []).map((log: any) => ({
+        ...log,
+        user_name: log.users?.nome || 'Usuário Desconhecido'
+      }));
+
+      setLogs(processedLogs);
+      calculateStats(processedLogs);
     } catch (err) {
       console.error('Erro ao carregar logs de auditoria:', err);
       setError('Falha ao carregar logs de auditoria');
@@ -616,8 +628,11 @@ export const AuditView: React.FC = () => {
                         setExpandedRow(expandedRow === log.id ? null : log.id)
                       }
                     >
-                      <td className="px-6 py-4 text-sm text-gray-900 font-medium truncate">
-                        {log.user_id?.substring(0, 8)}...
+                      <td 
+                        className="px-6 py-4 text-sm text-gray-900 font-medium truncate"
+                        title={log.user_id}
+                      >
+                        {log.user_name}
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getResourceColor(log.resource)}`}>

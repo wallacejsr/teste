@@ -14,6 +14,7 @@ import LoginView from './views/LoginView';
 import MasterAdminView from './views/MasterAdminView';
 import AuditView from './views/AuditView';
 import UpgradeModal from './components/UpgradeModal';
+import ModernLoading from './components/ModernLoading';
 import { User, Project, Task, Resource, DailyLog, Role, Tenant, LicenseStatus, GlobalConfig, PlanTemplate } from './types';
 import { AlertCircle, MessageSquare, Wifi, WifiOff, CheckCircle, Clock } from 'lucide-react';
 import { Toaster } from 'sonner';
@@ -174,13 +175,6 @@ const App: React.FC = () => {
       // Carregar fila de sincronização pendente
       dataSyncService.loadQueueFromStorage();
 
-      // Expor dataSyncService globalmente apenas em DEV (evitar vazamento em produção)
-      if (import.meta.env.DEV && typeof window !== 'undefined') {
-        (window as any).__dataSyncService = dataSyncService;
-        console.log('[App] 🛠️ DataSync service exposed as window.__dataSyncService');
-        console.log('[App] 📋 Debug commands: __dataSyncService.clearQueue(), .clearQueueItem(id), .getQueue()');
-      }
-
       // Verificar sessão existente (PILAR 3)
       const session = await authService.getSession();
       if (session) {
@@ -188,7 +182,6 @@ const App: React.FC = () => {
         if (user && user.ativo) {
           setCurrentUser(user);
           setIsLoggedIn(true);
-          console.log('[App] Sessão restaurada:', user.email);
           
           // Carregar dados se não for master
           if (user.tenantId && user.role !== Role.SUPERADMIN) {
@@ -266,8 +259,6 @@ const App: React.FC = () => {
     if (!authInitialized) return;
 
     const unsubscribe = authService.onAuthStateChange(async (event, session) => {
-      console.log('[App] Auth state changed:', event);
-
       if (event === 'SIGNED_IN' && session) {
         const user = await authService.getCurrentUser();
         if (user && user.ativo) {
@@ -278,7 +269,6 @@ const App: React.FC = () => {
           // PILAR 4: Inicializar Permission Manager
           if (user.tenantId && dataSyncService.supabase) {
             permissionManager.initialize(dataSyncService.supabase, user.tenantId, user.role);
-            console.log('[App] Permission Manager initialized for:', user.email);
           }
           
           // Carregar dados
@@ -286,10 +276,8 @@ const App: React.FC = () => {
             // SUPERADMIN: Carregar TODOS os tenants para Gestão de Empresas
             const allTenantsData = await dataSyncService.loadAllTenants();
             setTenants(allTenantsData);
-            console.log('[App] SUPERADMIN: Loaded all tenants for Master Console');
             const allUsersData = await dataSyncService.loadAllUsers();
             setAllUsers(allUsersData);
-            console.log('[App] SUPERADMIN: Loaded all users for Master Console');
           } else if (user.tenantId) {
             // User regular: Carregar dados do seu tenant
             await loadDataFromSupabase();
@@ -310,8 +298,6 @@ const App: React.FC = () => {
         
         // PILAR 4: Limpar Permission Manager
         permissionManager.clearCache();
-      } else if (event === 'TOKEN_REFRESHED') {
-        console.log('[App] Token refreshed');
       }
     });
 
@@ -320,15 +306,33 @@ const App: React.FC = () => {
     };
   }, [authInitialized]);
 
+  // =====================================================
+  // SINCRONIZAÇÃO DE ROLE E RESET DE TAB
+  // =====================================================
+  useEffect(() => {
+    if (!isLoggedIn || !currentUser.id || currentUser.id === 'anon') return;
+
+    // Reset tab se o role atual não permitir a tab
+    const isSuperAdmin = currentUser.role === Role.SUPERADMIN;
+    const isCommonUser = currentUser.role !== Role.SUPERADMIN;
+
+    // Se SUPERADMIN mas tab é de usuário comum, reset para master-dash
+    if (isSuperAdmin && activeTab !== 'master-dash' && !['dashboard', 'obras', 'planejamento', 'gantt', 'financeiro', 'recursos', 'diario', 'usuarios', 'config', 'audit'].includes(activeTab)) {
+      setActiveTab('master-dash');
+    }
+
+    // Se usuário comum mas tab é admin-only (master-dash), reset para dashboard
+    if (isCommonUser && activeTab === 'master-dash') {
+      setActiveTab('dashboard');
+    }
+  }, [isLoggedIn, currentUser.role, currentUser.id]);
+
   const loadPlanTemplatesFromSupabase = async () => {
     try {
       const templates = await dataSyncService.loadPlanTemplates();
       if (templates.length) {
         setPlansConfig(templates);
         localStorage.setItem('ep_plans_config', JSON.stringify(templates));
-        console.log(`[App] Loaded ${templates.length} plan templates from Supabase`);
-      } else {
-        console.warn('[App] No plan templates returned from Supabase; keeping existing plansConfig');
       }
     } catch (error) {
       console.error('[App] Error loading plan templates:', error);
@@ -341,15 +345,11 @@ const App: React.FC = () => {
       if (config) {
         setGlobalConfig(config);
         localStorage.setItem('ep_global_config', JSON.stringify(config));
-        console.log('[App] Global config loaded from Supabase');
         
         // Aplicar primaryColor ao CSS root para tema global
         if (config.primaryColor) {
           document.documentElement.style.setProperty('--primary-color', config.primaryColor);
-          console.log('[App] CSS variable --primary-color applied:', config.primaryColor);
         }
-      } else {
-        console.warn('[App] No global config in database; using defaults');
       }
     } catch (error) {
       console.error('[App] Error loading global config:', error);
@@ -378,9 +378,6 @@ const App: React.FC = () => {
           }
           return updated;
         });
-        console.log(`[App] Tenant name synchronized from database: ${tenantData.nome}`);
-      } else {
-        console.warn(`[App] Failed to load tenant data for ${currentUser.tenantId}, using cached value`);
       }
 
       // Carregar dados dos projetos, tarefas, etc.
@@ -399,7 +396,6 @@ const App: React.FC = () => {
       
       setSyncStatus('online');
       showNotification('✅ Dados sincronizados com sucesso', 'success');
-      console.log('[App] Data loaded from Supabase successfully');
     } catch (error) {
       console.error('[App] Error loading from Supabase:', error);
       setSyncStatus('offline');
@@ -420,10 +416,7 @@ const App: React.FC = () => {
     if (savedProjects) setProjects(JSON.parse(savedProjects));
     if (savedTasks) setTasks(JSON.parse(savedTasks));
     if (savedResources) setResources(JSON.parse(savedResources));
-
     if (savedLogs) setDailyLogs(JSON.parse(savedLogs));
-
-    console.log('[App] Data loaded from localStorage');
   };
 
   // Recarregar dados quando usuário faz login
@@ -442,8 +435,6 @@ const App: React.FC = () => {
     if (!isLoggedIn || !tenantGuardRef.current) {
       return;
     }
-
-    console.log('[TenantGuard] Iniciando validação de sessão');
 
     // Validar session imediatamente
     const validateSession = async () => {
@@ -1008,6 +999,13 @@ const App: React.FC = () => {
     }
   };
 
+  // =====================================================
+  // AUTH GUARD - Prevenir race condition no refresh
+  // =====================================================
+  if (!authInitialized || isLoadingData) {
+    return <ModernLoading globalConfig={globalConfig} />;
+  }
+
   if (!isLoggedIn) {
     return <LoginView onLogin={handleLogin} globalConfig={globalConfig} />;
   }
@@ -1068,17 +1066,6 @@ const App: React.FC = () => {
             {notification.type === 'warning' && <Clock size={20} />}
             {notification.type === 'error' && <AlertCircle size={20} />}
             <span className="font-medium">{notification.message}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Loading Overlay durante carregamento inicial */}
-      {isLoadingData && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4">
-            <Clock size={48} className="animate-spin text-blue-500" />
-            <p className="text-lg font-semibold">Carregando dados...</p>
-            <p className="text-sm text-gray-500">Sincronizando com servidor</p>
           </div>
         </div>
       )}
