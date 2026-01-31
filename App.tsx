@@ -133,7 +133,6 @@ const App: React.FC = () => {
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       if (!supabaseUrl || !supabaseKey) {
-        console.warn('[App] Supabase not configured, using localStorage fallback');
         setSyncStatus('offline');
         setAuthInitialized(true);
         loadFromLocalStorage();
@@ -307,25 +306,28 @@ const App: React.FC = () => {
   }, [authInitialized]);
 
   // =====================================================
-  // SINCRONIZAÇÃO DE ROLE E RESET DE TAB
+  // SINCRONIZAÇÃO DE ROLE E RESET DE TAB (AGRESSIVA)
   // =====================================================
   useEffect(() => {
     if (!isLoggedIn || !currentUser.id || currentUser.id === 'anon') return;
 
-    // Reset tab se o role atual não permitir a tab
     const isSuperAdmin = currentUser.role === Role.SUPERADMIN;
     const isCommonUser = currentUser.role !== Role.SUPERADMIN;
 
-    // Se SUPERADMIN mas tab é de usuário comum, reset para master-dash
-    if (isSuperAdmin && activeTab !== 'master-dash' && !['dashboard', 'obras', 'planejamento', 'gantt', 'financeiro', 'recursos', 'diario', 'usuarios', 'config', 'audit'].includes(activeTab)) {
+    // MODO AGRESSIVO: Se SUPERADMIN, sempre force master-dash
+    // Exceto se a tab atual for explicitamente SUPERADMIN
+    const superadminTabs = ['master-dash', 'tenants', 'users', 'audit'];
+    if (isSuperAdmin && !superadminTabs.includes(activeTab)) {
       setActiveTab('master-dash');
+      // Limpar localStorage de dados de tenant comum para evitar vazamento
+      localStorage.removeItem('ep_selectedProject');
     }
 
-    // Se usuário comum mas tab é admin-only (master-dash), reset para dashboard
+    // Se usuário comum mas tab é admin-only, reset para dashboard
     if (isCommonUser && activeTab === 'master-dash') {
       setActiveTab('dashboard');
     }
-  }, [isLoggedIn, currentUser.role, currentUser.id]);
+  }, [isLoggedIn, currentUser.role, currentUser.id, activeTab]);
 
   const loadPlanTemplatesFromSupabase = async () => {
     try {
@@ -488,7 +490,6 @@ const App: React.FC = () => {
 
     const syncWithDelay = async () => {
       try {
-        console.log('[App] Triggering project sync for', projects.length, 'projects');
         await syncProjectsWithSupabase(projects);
       } catch (error) {
         console.error('[App] Failed to sync projects:', error);
@@ -508,7 +509,6 @@ const App: React.FC = () => {
 
     const syncWithDelay = async () => {
       try {
-        console.log('[App] Triggering resource sync for', resources.length, 'resources');
         await syncResourcesWithSupabase(resources);
       } catch (error) {
         console.error('[App] Failed to sync resources:', error);
@@ -527,7 +527,6 @@ const App: React.FC = () => {
 
     const syncWithDelay = async () => {
       try {
-        console.log('[App] Triggering daily log sync for', dailyLogs.length, 'logs');
         await syncDailyLogsWithSupabase(dailyLogs);
       } catch (error) {
         console.error('[App] Failed to sync daily logs:', error);
@@ -564,6 +563,11 @@ const App: React.FC = () => {
   // REAL-TIME LISTENERS (SUPABASE)
   // =====================================================
   useEffect(() => {
+    // BLOQUEIO: Não executar Realtime para SUPERADMIN
+    if (currentUser.role === Role.SUPERADMIN) {
+      return;
+    }
+
     if (!isLoggedIn || !currentUser.tenantId || currentUser.tenantId === 'master') {
       return;
     }
@@ -572,12 +576,8 @@ const App: React.FC = () => {
       return;
     }
 
-    console.log('[App] Setting up real-time listeners for tenant:', currentUser.tenantId);
-
     // Listener para Tasks
     dataSyncService.setupRealtimeListener(currentUser.tenantId, 'tasks', (payload) => {
-      console.log('[Realtime] Task change:', payload);
-      
       if (payload.eventType === 'INSERT') {
         setTasks(prev => [...prev, payload.new]);
       } else if (payload.eventType === 'UPDATE') {
@@ -589,8 +589,6 @@ const App: React.FC = () => {
 
     // Listener para Projects
     dataSyncService.setupRealtimeListener(currentUser.tenantId, 'projects', (payload) => {
-      console.log('[Realtime] Project change:', payload);
-      
       if (payload.eventType === 'INSERT') {
         setProjects(prev => [...prev, payload.new]);
       } else if (payload.eventType === 'UPDATE') {
@@ -602,8 +600,6 @@ const App: React.FC = () => {
 
     // Listener para Resources
     dataSyncService.setupRealtimeListener(currentUser.tenantId, 'resources', (payload) => {
-      console.log('[Realtime] Resource change:', payload);
-      
       if (payload.eventType === 'INSERT') {
         setResources(prev => [...prev, payload.new]);
       } else if (payload.eventType === 'UPDATE') {
@@ -615,8 +611,6 @@ const App: React.FC = () => {
 
     // Listener para Daily Logs
     dataSyncService.setupRealtimeListener(currentUser.tenantId, 'daily_logs', (payload) => {
-      console.log('[Realtime] Daily log change:', payload);
-      
       if (payload.eventType === 'INSERT') {
         setDailyLogs(prev => [...prev, payload.new]);
       } else if (payload.eventType === 'UPDATE') {
@@ -630,7 +624,7 @@ const App: React.FC = () => {
     return () => {
       dataSyncService.removeAllListeners();
     };
-  }, [isLoggedIn, currentUser.tenantId]);
+  }, [isLoggedIn, currentUser.tenantId, currentUser.role]);
 
   // =====================================================
   // FUNÇÕES DE SINCRONIZAÇÃO COM SUPABASE
@@ -646,7 +640,6 @@ const App: React.FC = () => {
       const idConversions = await dataSyncService.bulkSyncTasks(updatedTasks, currentUser.id, currentUser.tenantId);
 
       if (idConversions.size > 0) {
-        console.log('[App] Updating local task IDs with converted UUIDs:', Array.from(idConversions.entries()));
         setTasks(prev => prev.map(t => {
           const newId = idConversions.get(t.id);
           return newId ? { ...t, id: newId } : t;
@@ -662,18 +655,15 @@ const App: React.FC = () => {
 
   const syncProjectsWithSupabase = async (updatedProjects: Project[]) => {
     if (!dataSyncService.isAvailable()) {
-      console.warn('[App] Supabase not available, saving locally');
       return;
     }
 
     setSyncStatus('syncing');
     try {
-      console.log('[App] Syncing', updatedProjects.length, 'projects to Supabase');
       const idConversions = await dataSyncService.syncProjects(updatedProjects, currentUser.id, currentUser.tenantId);
       
       // Atualizar IDs temporários para UUIDs reais no estado local
       if (idConversions.size > 0) {
-        console.log('[App] Updating local state with converted IDs:', Array.from(idConversions.entries()));
         setProjects(prev => prev.map(p => {
           const newId = idConversions.get(p.id);
           return newId ? { ...p, id: newId } : p;
@@ -681,7 +671,6 @@ const App: React.FC = () => {
       }
       
       setSyncStatus('online');
-      console.log('[App] Projects sync completed successfully');
     } catch (error: any) {
       console.error('[App] Error syncing projects:', error);
       setSyncStatus('offline');
@@ -703,7 +692,6 @@ const App: React.FC = () => {
       const idConversions = await dataSyncService.syncResources(updatedResources, currentUser.id, currentUser.tenantId);
 
       if (idConversions.size > 0) {
-        console.log('[App] Updating local resource IDs with converted UUIDs:', Array.from(idConversions.entries()));
         setResources(prev => prev.map(r => {
           const newId = idConversions.get(r.id);
           return newId ? { ...r, id: newId } : r;
@@ -728,7 +716,6 @@ const App: React.FC = () => {
       const idConversions = await dataSyncService.syncDailyLogs(updatedLogs, currentUser.id, currentUser.tenantId);
 
       if (idConversions.size > 0) {
-        console.log('[App] Updating local daily log IDs with converted UUIDs:', Array.from(idConversions.entries()));
         setDailyLogs(prev => prev.map(l => {
           const newId = idConversions.get(l.id);
           return newId ? { ...l, id: newId } : l;
@@ -995,7 +982,13 @@ const App: React.FC = () => {
       );
       case 'config': return <ProfileView plansConfig={plansConfig} user={currentUser} onUpdateUser={setCurrentUser} tenant={tenantForUI} onUpdateTenant={(t) => setTenants(prev => prev.map(item => item.id === t.id ? t : item))} allUsers={tenantUsers} onUpdateUsers={(updatedTenantUsers) => { const otherUsers = allUsers.filter(u => u.tenantId !== currentUser.tenantId); setAllUsers([...otherUsers, ...updatedTenantUsers]); }} globalConfig={globalConfig} onUpdateGlobalConfig={setGlobalConfig} />;
       case 'audit': return <AuditView />;
-      default: return <Dashboard projects={tenantProjects} tasks={tenantTasks} resources={tenantResources} dailyLogs={tenantLogs} />;
+      default:
+        // BLINDAGEM: Se SUPERADMIN, fallback obrigatório é MasterAdminView
+        if (currentUser.role === Role.SUPERADMIN) {
+          return <MasterAdminView activeTab="master-dash" globalConfig={globalConfig} onUpdateGlobalConfig={setGlobalConfig} allTenants={tenants} onUpdateTenants={setTenants} allUsers={allUsers} onUpdateUsers={setAllUsers} allProjects={projects} allDailyLogs={dailyLogs} plansConfig={plansConfig} onUpdatePlansConfig={setPlansConfig} onSimulateAccess={(user) => { setCurrentUser(user); setActiveTab('dashboard'); }} />;
+        }
+        // Para usuário comum, fallback é Dashboard
+        return <Dashboard projects={tenantProjects} tasks={tenantTasks} resources={tenantResources} dailyLogs={tenantLogs} />;
     }
   };
 
