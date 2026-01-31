@@ -919,7 +919,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-sm">
           <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em] mb-10">Market Share por Plano</h3>
-          <div className="h-[250px] relative">
+          <div className="h-[250px] min-h-[300px] relative">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={dashboardStats.marketShareData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
@@ -936,7 +936,7 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
         </div>
         <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-sm">
           <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em] mb-10">Crescimento da Base</h3>
-          <div className="h-[250px]">
+          <div className="h-[250px] min-h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={dashboardStats.growthData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />

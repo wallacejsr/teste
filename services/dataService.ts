@@ -32,8 +32,10 @@ interface ConflictResolution {
 /**
  * Serviço de Sincronização com Supabase
  * Implementa fila offline, retry exponencial e detecção de conflitos
+ * SINGLETON: Cliente Supabase é criado apenas uma vez e compartilhado
  */
 class DataSyncService {
+  private static instance: DataSyncService | null = null;
   private supabase: SupabaseClient | null = null;
   private syncQueue: SyncQueueItem[] = [];
   private syncInterval: NodeJS.Timeout | null = null;
@@ -128,16 +130,38 @@ class DataSyncService {
   }
 
   /**
-   * Inicializar cliente Supabase
+   * Obter instância Singleton do DataSyncService
    */
-  initialize(supabaseUrl: string, supabaseKey: string) {
+  static getInstance(): DataSyncService {
+    if (!DataSyncService.instance) {
+      DataSyncService.instance = new DataSyncService();
+    }
+    return DataSyncService.instance;
+  }
+
+  /**
+   * Construtor privado (Singleton pattern)
+   */
+  private constructor() {}
+
+  /**
+   * Inicializar cliente Supabase (Singleton - chamado apenas uma vez)
+   */
+  static initialize(supabaseUrl: string, supabaseKey: string): boolean {
+    const instance = DataSyncService.getInstance();
+    
+    // Se já foi inicializado, pular
+    if (instance.supabase !== null) {
+      return true;
+    }
+
     if (!supabaseUrl || !supabaseKey) {
       console.error('[DataSync] Supabase credentials missing');
       return false;
     }
 
     try {
-      this.supabase = createClient(supabaseUrl, supabaseKey, {
+      instance.supabase = createClient(supabaseUrl, supabaseKey, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
@@ -150,11 +174,10 @@ class DataSyncService {
       });
 
       // Iniciar processamento automático da fila a cada 5 segundos
-      this.syncInterval = setInterval(() => {
-        this.processPendingQueue();
+      instance.syncInterval = setInterval(() => {
+        instance.processPendingQueue();
       }, 5000);
 
-      console.log('[DataSync] Initialized successfully');
       return true;
     } catch (error) {
       console.error('[DataSync] Initialization failed:', error);
@@ -1403,5 +1426,8 @@ class DataSyncService {
   }
 }
 
-// Exportar instância singleton
-export const dataSyncService = new DataSyncService();
+// Exportar classe para uso de Singleton pattern
+export { DataSyncService };
+
+// Exportar instância legada para compatibilidade
+export const dataSyncService = DataSyncService.getInstance();

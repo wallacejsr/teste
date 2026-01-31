@@ -19,6 +19,7 @@ import { User, Project, Task, Resource, DailyLog, Role, Tenant, LicenseStatus, G
 import { AlertCircle, MessageSquare, Wifi, WifiOff, CheckCircle, Clock } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { dataSyncService } from './services/dataService';
+import { DataSyncService } from './services/dataService';
 import { authService } from './services/authService';
 import { permissionManager } from './services/permissionManager';
 import { TenantGuard, useTenantGuard } from './src/middleware/tenantGuard';
@@ -142,11 +143,14 @@ const App: React.FC = () => {
       // Inicializar o serviço de autenticação (PILAR 3)
       const authInit = authService.initialize(supabaseUrl, supabaseKey);
       
-      // Inicializar o serviço de sincronização
-      const dataInit = dataSyncService.initialize(supabaseUrl, supabaseKey);
+      // Inicializar o serviço de sincronização (SINGLETON - chamado apenas uma vez)
+      const dataInit = DataSyncService.initialize(supabaseUrl, supabaseKey);
+      
+      // Obter instância singleton para uso posterior
+      const dataSyncInstance = DataSyncService.getInstance();
       
       // Registrar callback de erro de permissão
-      dataSyncService.setPermissionErrorCallback((message) => {
+      dataSyncInstance.setPermissionErrorCallback((message) => {
         showNotification(message, 'error');
       });
       
@@ -316,9 +320,10 @@ const App: React.FC = () => {
 
     // MODO AGRESSIVO: Se SUPERADMIN, sempre force master-dash
     // Exceto se a tab atual for explicitamente SUPERADMIN
-    const superadminTabs = ['master-dash', 'tenants', 'users', 'audit'];
+    const superadminTabs = ['master-dash', 'tenants', 'users', 'subscriptions', 'system-branding', 'payments', 'config', 'audit'];
     if (isSuperAdmin && !superadminTabs.includes(activeTab)) {
       setActiveTab('master-dash');
+      localStorage.setItem('ep_activeTab', 'master-dash');
       // Limpar localStorage de dados de tenant comum para evitar vazamento
       localStorage.removeItem('ep_selectedProject');
     }
@@ -326,6 +331,7 @@ const App: React.FC = () => {
     // Se usuário comum mas tab é admin-only, reset para dashboard
     if (isCommonUser && activeTab === 'master-dash') {
       setActiveTab('dashboard');
+      localStorage.setItem('ep_activeTab', 'dashboard');
     }
   }, [isLoggedIn, currentUser.role, currentUser.id, activeTab]);
 
