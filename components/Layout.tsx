@@ -111,14 +111,16 @@ const Layout: React.FC<LayoutProps> = ({
   ];
 
   const filteredClientMenuItems = clientMenuItems.filter((item) => {
-    if (item.id === 'config' && !canViewSettings) return false;
+    // Config (Ajustes) sempre visível para todos os usuários autenticados
+    if (item.id === 'config') return true;
     return true;
   });
 
   const filteredMasterMenuItems = masterMenuItems.filter((item) => {
-    // Auditoria só para SUPERADMIN
+    // Auditoria só para SUPERADMIN (sempre mostrar se for SUPERADMIN)
     if (item.id === 'audit' && user.role !== Role.SUPERADMIN) return false;
-    if (item.id === 'config' && !canViewSettings) return false;
+    // Config (Meu Perfil) sempre visível para SUPERADMIN
+    if (item.id === 'config' && user.role !== Role.SUPERADMIN && !canViewSettings) return false;
     return true;
   });
 

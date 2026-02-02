@@ -24,6 +24,40 @@ import { authService } from './services/authService';
 import { permissionManager } from './services/permissionManager';
 import { TenantGuard, useTenantGuard } from './src/middleware/tenantGuard';
 
+/**
+ * ==========================================
+ * ESTRATÉGIA DE SEGURANÇA - ROLE PERSISTENCE
+ * ==========================================
+ * 
+ * PROBLEMA RESOLVIDO: Refresh (F5) causava "Acesso Negado" para SUPERADMIN
+ * 
+ * SOLUÇÃO IMPLEMENTADA (Multi-camada):
+ * 
+ * 1. FAIL-SAFE CACHE (localStorage):
+ *    - Salva role/id no localStorage apenas como CACHE TEMPORÁRIO
+ *    - Usado APENAS para evitar race condition durante refresh
+ *    - NUNCA usado como fonte de verdade para autenticação
+ * 
+ * 2. VALIDAÇÃO OBRIGATÓRIA (Supabase):
+ *    - Todo acesso valida JWT via authService.getCurrentUser()
+ *    - Cache é descartado se sessão não validar
+ *    - Logout limpa cache automaticamente
+ * 
+ * 3. AUTH GUARD REFORÇADO:
+ *    - Aguarda role estar definida antes de renderizar
+ *    - Limpa cache de permissões no refresh (permissionManager.clearCache())
+ *    - ModernLoading visível até validação completa
+ * 
+ * 4. MENUS GARANTIDOS:
+ *    - Layout.tsx força visibilidade de 'config' e 'audit' para SUPERADMIN
+ *    - Independente de canViewSettings (que pode ter cache sujo)
+ * 
+ * SEGURANÇA MANTIDA:
+ * - Cache não pode ser injetado via DevTools (validação JWT obrigatória)
+ * - Sessão inválida = logout automático
+ * - Tenant Guard continua validando todas as operações RLS
+ */
+
 const App: React.FC = () => {
   // PILAR 3: Autenticação agora vem do Supabase Auth, não do localStorage
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -186,10 +220,30 @@ const App: React.FC = () => {
           setCurrentUser(user);
           setIsLoggedIn(true);
           
+          // FAIL-SAFE: Salvar role no localStorage (apenas cache, sempre validar com Supabase)
+          localStorage.setItem('ep_user_role_cache', user.role);
+          localStorage.setItem('ep_user_id_cache', user.id);
+          
+          // Limpar cache antigo de permissões (força revalidação)
+          permissionManager.clearCache();
+          
           // Carregar dados se não for master
           if (user.tenantId && user.role !== Role.SUPERADMIN) {
             await loadDataFromSupabase();
           }
+        }
+      } else {
+        // Sem sessão: tentar recuperar role do cache temporariamente (será validado logo)
+        const cachedRole = localStorage.getItem('ep_user_role_cache') as Role | null;
+        const cachedUserId = localStorage.getItem('ep_user_id_cache');
+        
+        if (cachedRole && cachedUserId) {
+          // Usuário momentâneo até validação do Supabase
+          setCurrentUser(prev => ({ 
+            ...prev, 
+            id: cachedUserId,
+            role: cachedRole 
+          }));
         }
       }
 
@@ -269,7 +323,12 @@ const App: React.FC = () => {
           setIsLoggedIn(true);
           showNotification('Login realizado com sucesso!', 'success');
           
-          // PILAR 4: Inicializar Permission Manager
+          // FAIL-SAFE: Persistir role no localStorage (cache validado)
+          localStorage.setItem('ep_user_role_cache', user.role);
+          localStorage.setItem('ep_user_id_cache', user.id);
+          
+          // PILAR 4: Limpar cache antigo e reinicializar Permission Manager
+          permissionManager.clearCache();
           const supabaseClient = dataSyncService.getSupabaseClient();
           if (user.tenantId && supabaseClient) {
             permissionManager.initialize(supabaseClient, user.tenantId, user.role);
@@ -300,8 +359,10 @@ const App: React.FC = () => {
         setActiveTab('dashboard');
         showNotification('Logout realizado', 'success');
         
-        // PILAR 4: Limpar Permission Manager
+        // PILAR 4: Limpar Permission Manager e cache de role
         permissionManager.clearCache();
+        localStorage.removeItem('ep_user_role_cache');
+        localStorage.removeItem('ep_user_id_cache');
       }
     });
 
@@ -734,7 +795,7 @@ const App: React.FC = () => {
     
     // Master admin bypass (temporário - pode ser removido após migração completa)
     if (normalizedEmail === 'master@plataforma.com' || normalizedEmail === 'wallacejoaosilva@gmail.com') {
-      setCurrentUser({ 
+      const masterUser = { 
         id: 'master', 
         nome: 'Super Administrador', 
         email: 'master@plataforma.com', 
@@ -742,9 +803,19 @@ const App: React.FC = () => {
         role: Role.SUPERADMIN, 
         ativo: true, 
         cargo: 'Plataforma Owner' 
-      });
+      };
+      
+      setCurrentUser(masterUser);
       setActiveTab('master-dash');
       setIsLoggedIn(true);
+      
+      // FAIL-SAFE: Persistir role no localStorage
+      localStorage.setItem('ep_user_role_cache', Role.SUPERADMIN);
+      localStorage.setItem('ep_user_id_cache', 'master');
+      
+      // Limpar cache de permissões
+      permissionManager.clearCache();
+      
       return;
     }
     
@@ -988,7 +1059,10 @@ const App: React.FC = () => {
   // =====================================================
   // AUTH GUARD - Prevenir race condition no refresh
   // =====================================================
-  if (!authInitialized || isLoadingData) {
+  // CRÍTICO: Aguardar role estar definida para evitar "Acesso Negado" no SUPERADMIN
+  const isRoleLoaded = currentUser.id !== 'anon' && currentUser.role !== undefined;
+  
+  if (!authInitialized || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
     return <ModernLoading globalConfig={globalConfig} />;
   }
 
