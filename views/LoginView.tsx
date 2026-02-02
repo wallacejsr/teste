@@ -9,11 +9,12 @@ import { authService } from '../services/authService';
 interface LoginViewProps {
   onLogin: (email: string, password: string) => void;
   globalConfig: GlobalConfig;
+  imagePreloaded?: boolean; // 🖼️ Flag indicando que imagem já foi precarregada
 }
 
 type ViewMode = 'login' | 'signup' | 'reset';
 
-const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
+const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePreloaded = false }) => {
   const [mode, setMode] = useState<ViewMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,31 +23,16 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [backgroundLoaded, setBackgroundLoaded] = useState(false);
-  const [imageReady, setImageReady] = useState(false); // 🖼️ Preloader de imagem
+  // ✅ Usar imagePreloaded do App.tsx ao invés de preload interno
+  const [imageReady, setImageReady] = useState(imagePreloaded);
   const primaryColor = globalConfig.primaryColor || '#3b82f6';
   
-  // 🖼️ PRELOADER DE IMAGEM: Carregar imagem de fundo em memória antes de exibir
+  // ✨ Sincronizar imageReady com prop imagePreloaded
   useEffect(() => {
-    const imageUrl = globalConfig.loginBackgroundUrl || "https://images.unsplash.com/photo-1589492477543-e4f4c8ee3a7d?w=1200&h=1600&fit=crop&q=80";
-    
-    // Criar objeto Image para pré-carregar
-    const img = new Image();
-    
-    img.onload = () => {
+    if (imagePreloaded) {
       setImageReady(true);
-      setBackgroundLoaded(true);
-    };
-    
-    img.onerror = () => {
-      // Em caso de erro, marcar como pronto para não travar
-      setImageReady(true);
-      setBackgroundLoaded(true);
-    };
-    
-    // Iniciar carregamento
-    img.src = imageUrl;
-  }, [globalConfig.loginBackgroundUrl]);
+    }
+  }, [imagePreloaded]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,36 +163,28 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
   };
 
   return (
-    <div className="h-screen w-full flex bg-white font-['Inter'] overflow-hidden">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+      className="h-screen w-full flex bg-white font-['Inter'] overflow-hidden"
+    >
       {/* LEFT SIDE - Visual (60%) */}
       <div className="hidden lg:flex w-3/5 relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        {/* 🎨 LOADING STATE: Fundo sólido enquanto imagem carrega */}
-        {!imageReady && (
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-              <p className="text-slate-400 text-sm font-medium">Carregando experiência...</p>
-            </div>
-          </div>
-        )}
-        
-        {/* 🖼️ IMAGEM DE FUNDO: Fade-in atômico após carregamento completo */}
+        {/* 🖼️ IMAGEM DE FUNDO: Já precarregada pelo App.tsx, fade-in suave */}
         <motion.img 
           src={globalConfig.loginBackgroundUrl || "https://images.unsplash.com/photo-1589492477543-e4f4c8ee3a7d?w=1200&h=1600&fit=crop&q=80"} 
           alt="Background"
           initial={{ opacity: 0 }}
-          animate={{ opacity: imageReady ? 1 : 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
           className="absolute inset-0 w-full h-full object-cover"
         />
         
         {/* Overlay escuro elegante */}
-        {imageReady && (
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/40 to-slate-900/20"></div>
-        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/40 to-slate-900/20"></div>
 
-        {/* 📝 CONTEÚDO VISUAL: Só exibir após imagem pronta (fade-in atômico) */}
-        {imageReady && (
+        {/* 📝 CONTEÚDO VISUAL: Fade-in sincronizado com imagem */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -243,7 +221,6 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
             </div>
           </motion.div>
         </motion.div>
-        )}
       </div>
 
       {/* RIGHT SIDE - Formulário (40%) */}
@@ -460,7 +437,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
           </motion.p>
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 };
 

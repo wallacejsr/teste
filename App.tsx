@@ -83,6 +83,12 @@ const App: React.FC = () => {
   
   // 🔒 BRANDING READY: Flag para garantir que branding foi carregado antes de mostrar UI
   const [brandingReady, setBrandingReady] = useState(false);
+  
+  // 🖼️ LOGIN IMAGE PRELOADED: Flag para garantir que imagem de fundo foi precarregada
+  const [loginImagePreloaded, setLoginImagePreloaded] = useState(false);
+  
+  // ✅ LOGIN READY: Combinação de branding + imagem = RevElação da LoginView
+  const loginReady = brandingReady && loginImagePreloaded;
 
   const [plansConfig, setPlansConfig] = useState<PlanTemplate[]>(() => {
     const saved = localStorage.getItem('ep_plans_config');
@@ -450,6 +456,29 @@ const App: React.FC = () => {
       setBrandingReady(true);
     }
   };
+  
+  // 🖼️ PRELOAD DA IMAGEM DE FUNDO: Carregar em memória ANTES de revelar LoginView
+  useEffect(() => {
+    if (!brandingReady) return; // Só preload DEPOIS do branding estar pronto
+    
+    const imageUrl = globalConfig.loginBackgroundUrl || "https://images.unsplash.com/photo-1589492477543-e4f4c8ee3a7d?w=1200&h=1600&fit=crop&q=80";
+    
+    // Criar objeto Image para pré-carregar
+    const img = new Image();
+    
+    img.onload = () => {
+      console.log('✅ [App] Imagem de fundo precarregada com sucesso');
+      setLoginImagePreloaded(true);
+    };
+    
+    img.onerror = () => {
+      console.warn('⚠️ [App] Erro ao precarregar imagem, continuando...');
+      setLoginImagePreloaded(true); // Fail-safe: continuar mesmo com erro
+    };
+    
+    console.log('🖼️ [App] Iniciando preload da imagem:', imageUrl);
+    img.src = imageUrl;
+  }, [brandingReady, globalConfig.loginBackgroundUrl]);
 
   // Carregar dados do Supabase
   const loadDataFromSupabase = async () => {
@@ -1091,14 +1120,15 @@ const App: React.FC = () => {
     return false;
   }, [currentUser.id, currentUser.role, tenants.length]);
   
-  // 🎨 BLINDAGEM DE IDENTIDADE: Aguardar branding estar pronto ANTES de liberar UI
-  // Previne exibição de 'PROJEX MASTER' ou valores vazios
-  if (!authInitialized || !brandingReady || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
+  // 🛑 ESCUDO TOTAL: ModernLoading até branding + imagem estarem 100% prontos
+  // Garante que usuário NUNCA vê valores vazios ou carregamento fragmentado
+  if (!authInitialized || !loginReady || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
     return <ModernLoading globalConfig={globalConfig} />;
   }
 
   if (!isLoggedIn) {
-    return <LoginView onLogin={handleLogin} globalConfig={globalConfig} />;
+    // ✨ REVELAÇÃO: Agora sim, tudo pronto para revelar LoginView com fade-in
+    return <LoginView onLogin={handleLogin} globalConfig={globalConfig} imagePreloaded={true} />;
   }
 
   // Trava de Licença Expirada (Restaurada do Backup)
