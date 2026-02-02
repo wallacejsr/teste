@@ -71,8 +71,10 @@ export const AuditView: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [dateRange, setDateRange] = useState<'24h' | '7d' | '30d'>('24h');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   // 🔐 PROTEÇÃO: Auditoria é exclusiva para SUPERADMIN
+  // AGUARDA permissionManager estar inicializado (evita race condition no F5)
   const permStatus = permissionManager.getStatus();
   const isSuperAdmin = permStatus.currentUserRole === Role.SUPERADMIN;
   
@@ -81,9 +83,19 @@ export const AuditView: React.FC = () => {
   
   // Acesso: SUPERADMIN ou com permissão explícita (redundante, mas seguro)
   const hasAuditAccess = isSuperAdmin || canReadAudit;
-
-  // Carregar logs de auditoria - aguarda permissões carregarem
+  
+  // Aguardar auth estar pronta (previne "Acesso Negado" momentâneo)
   useEffect(() => {
+    if (!permLoading && permStatus.isInitialized) {
+      setAuthReady(true);
+    }
+  }, [permLoading, permStatus.isInitialized]);
+
+  // Carregar logs de auditoria - aguarda auth estar pronta
+  useEffect(() => {
+    // Se auth não está pronta, aguarda (previne race condition)
+    if (!authReady) return;
+    
     // Se ainda está carregando permissões, aguarda
     if (permLoading) return;
     
@@ -94,7 +106,7 @@ export const AuditView: React.FC = () => {
     if (isSuperAdmin) {
       loadSecurityLogs();
     }
-  }, [dateRange, permLoading, hasAuditAccess, isSuperAdmin]);
+  }, [dateRange, permLoading, hasAuditAccess, isSuperAdmin, authReady]);
 
   // Aplicar filtros
   useEffect(() => {

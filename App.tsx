@@ -784,7 +784,7 @@ const App: React.FC = () => {
   };
 
   /* =====================================================
-     AUTENTICAÇÃO COM VALIDAÇÃO DE SENHA (PRODUÇÃO)
+     AUTENTICAÇÃO 100% DELEGADA AO SUPABASE (PILAR 3)
      ===================================================== */
   // =====================================================
   // HANDLERS DE AUTENTICAÇÃO (PILAR 3)
@@ -793,35 +793,23 @@ const App: React.FC = () => {
   const handleLogin = async (email: string, password: string = '') => {
     const normalizedEmail = email.toLowerCase().trim();
     
-    // Master admin bypass (temporário - pode ser removido após migração completa)
-    if (normalizedEmail === 'master@plataforma.com' || normalizedEmail === 'wallacejoaosilva@gmail.com') {
-      const masterUser = { 
-        id: 'master', 
-        nome: 'Super Administrador', 
-        email: 'master@plataforma.com', 
-        tenantId: '00000000-0000-0000-0000-000000000000', 
-        role: Role.SUPERADMIN, 
-        ativo: true, 
-        cargo: 'Plataforma Owner' 
-      };
-      
-      setCurrentUser(masterUser);
-      setActiveTab('master-dash');
-      setIsLoggedIn(true);
-      
-      // FAIL-SAFE: Persistir role no localStorage
-      localStorage.setItem('ep_user_role_cache', Role.SUPERADMIN);
-      localStorage.setItem('ep_user_id_cache', 'master');
-      
-      // Limpar cache de permissões
-      permissionManager.clearCache();
-      
+    if (!password) {
+      showNotification('⚠️ Senha é obrigatória', 'error');
       return;
     }
     
     // PILAR 3: Login real via Supabase Auth
-    // O authService.login() já faz toda a validação e atualiza o estado via onAuthStateChange
-    // Não precisamos fazer mais nada aqui - o listener de auth state cuida de tudo
+    // Delega 100% ao authService - valida credenciais, busca dados do banco
+    // O listener onAuthStateChange (linha 277) injeta automaticamente o usuário correto
+    const result = await authService.login({ email: normalizedEmail, password });
+    
+    if (!result.success) {
+      showNotification(result.error || 'Erro ao fazer login', 'error');
+      return;
+    }
+    
+    // Sucesso: onAuthStateChange já atualizou currentUser com dados do banco
+    showNotification('✅ Login realizado com sucesso!', 'success');
   };
 
   const handleLogout = async () => {
@@ -1081,7 +1069,13 @@ const App: React.FC = () => {
           </div>
           <div className="space-y-4">
             <h1 className="text-4xl font-black tracking-tighter uppercase">Acesso Bloqueado</h1>
-            <p className="text-slate-400 font-medium">A licença de uso da <span className="text-white font-black">{activeTenant.nome}</span> expirou em {new Date(activeTenant.dataFimLicenca).toLocaleDateString()}.</p>
+            <p className="text-slate-400 font-medium">
+              A licença de uso da <span className="text-white font-black">{activeTenant.nome}</span> expirou em{' '}
+              {activeTenant.dataFimLicenca && activeTenant.dataFimLicenca !== ''
+                ? new Date(activeTenant.dataFimLicenca).toLocaleDateString()
+                : 'data não disponível'
+              }.
+            </p>
           </div>
           <div className="space-y-4">
             <a href="https://wa.me/5511999999999" className="w-full py-5 bg-white text-slate-900 rounded-3xl font-black text-xs uppercase tracking-widest shadow-2xl flex items-center justify-center gap-3 hover:scale-105 transition-all">
