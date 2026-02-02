@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.0",
+    "@tailwindcss/postcss": "^4.1.18",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.24",
     "framer-motion": "^11.0.0",
