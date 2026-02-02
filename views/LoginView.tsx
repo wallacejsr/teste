@@ -157,10 +157,10 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
     <div className="h-screen w-full flex bg-white font-['Inter'] overflow-hidden">
       {/* LEFT SIDE - Visual (60%) */}
       <div className="hidden lg:flex w-3/5 relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        {/* Imagem de Fundo - Canteiro de Obras */}
+        {/* Imagem de Fundo - Dinâmica via White-label */}
         <img 
-          src="https://images.unsplash.com/photo-1589492477543-e4f4c8ee3a7d?w=1200&h=1600&fit=crop&q=80" 
-          alt="Canteiro de Obras"
+          src={globalConfig.loginBackgroundUrl || "https://images.unsplash.com/photo-1589492477543-e4f4c8ee3a7d?w=1200&h=1600&fit=crop&q=80"} 
+          alt="Background"
           onLoad={() => setBackgroundLoaded(true)}
           className="absolute inset-0 w-full h-full object-cover"
         />
@@ -181,10 +181,14 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig }) => {
             transition={{ duration: 0.8, delay: 0.4 }}
           >
             <h2 className="text-5xl font-black mb-6 max-w-lg leading-tight">
-              Engenharia que <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">conecta</span> pessoas
+              {globalConfig.loginHeading ? (
+                <span dangerouslySetInnerHTML={{ __html: globalConfig.loginHeading.replace('conecta', '<span class="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">conecta</span>') }} />
+              ) : (
+                <>Engenharia que <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">conecta</span> pessoas</>
+              )}
             </h2>
             <p className="text-xl text-slate-300 max-w-md font-light leading-relaxed">
-              Planeje, colabore e execute seus projetos com a precisão de uma obra bem coordenada. Tecnologia e engenharia em perfeita sinergia.
+              {globalConfig.loginDescription || 'Planeje, colabore e execute seus projetos com a precisão de uma obra bem coordenada. Tecnologia e engenharia em perfeita sinergia.'}
             </p>
           </motion.div>
 

@@ -138,8 +138,13 @@ CREATE TABLE IF NOT EXISTS global_configs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   software_name VARCHAR(255) DEFAULT 'PROJEX MASTER',
+  software_subtitle VARCHAR(255),
   primary_color VARCHAR(7) DEFAULT '#3b82f6',
   system_logo_url TEXT,
+  -- 🎨 Personalização da Tela de Login (White-label)
+  login_background_url TEXT,
+  login_heading VARCHAR(255),
+  login_description TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(tenant_id)

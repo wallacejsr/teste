@@ -42,6 +42,10 @@ export interface GlobalConfig {
   gatewayType?: 'STRIPE' | 'ASAAS' | 'MERCADO_PAGO';
   publicKey?: string;
   secretKey?: string;
+  // 🎨 Personalização da Tela de Login (White-label)
+  loginBackgroundUrl?: string; // URL da imagem de fundo
+  loginHeading?: string; // Título principal (ex: 'Engenharia que conecta pessoas')
+  loginDescription?: string; // Texto descritivo abaixo do título
 }
 
 /* ===========================

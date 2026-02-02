@@ -1109,6 +1109,46 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
                   className="px-6 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"><Upload size={14} /> Adicionar Logo URL</button>
               </div>
             </div>
+            
+            {/* 🎨 NOVA SEÇÃO: Personalização da Tela de Login */}
+            <div className="mt-12 pt-12 border-t border-slate-100">
+              <h4 className="text-xs font-black text-slate-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-2"><Lock size={16} className="text-indigo-600" /> Personalização da Tela de Login</h4>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">URL da Imagem de Fundo</label>
+                  <input 
+                    type="text" 
+                    value={globalConfig.loginBackgroundUrl || ''} 
+                    onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, loginBackgroundUrl: e.target.value })} 
+                    placeholder="https://exemplo.com/imagem-fundo.jpg" 
+                    className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-medium outline-none focus:ring-4 focus:ring-blue-100 transition-all" 
+                  />
+                  <p className="text-[9px] text-slate-400 font-medium px-1">Deixe vazio para usar a imagem padrão de obra</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Título Principal</label>
+                  <input 
+                    type="text" 
+                    value={globalConfig.loginHeading || ''} 
+                    onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, loginHeading: e.target.value })} 
+                    placeholder="Engenharia que conecta pessoas" 
+                    className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-100 transition-all" 
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Texto Descritivo</label>
+                  <textarea 
+                    value={globalConfig.loginDescription || ''} 
+                    onChange={(e) => onUpdateGlobalConfig({ ...globalConfig, loginDescription: e.target.value })} 
+                    placeholder="Planeje, colabore e execute seus projetos com a precisão de uma obra bem coordenada. Tecnologia e engenharia em perfeita sinergia." 
+                    rows={3}
+                    className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-sm font-medium outline-none focus:ring-4 focus:ring-blue-100 transition-all resize-none" 
+                  />
+                </div>
+              </div>
+            </div>
             <div className="mt-12 pt-8 border-t border-slate-50 flex justify-end">
               <button 
                 onClick={async () => {

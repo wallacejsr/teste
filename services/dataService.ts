@@ -605,6 +605,10 @@ class DataSyncService {
         gatewayType: data.gateway_type || undefined,
         publicKey: data.public_key || undefined,
         secretKey: data.secret_key || undefined,
+        // 🎨 Personalização da Tela de Login
+        loginBackgroundUrl: data.login_background_url || '',
+        loginHeading: data.login_heading || '',
+        loginDescription: data.login_description || '',
       };
 
       console.log('[DataSync] Global config loaded successfully');
@@ -635,6 +639,10 @@ class DataSyncService {
         software_subtitle: config.softwareSubtitle || null,
         system_logo_url: config.systemLogoUrl || null,
         primary_color: config.primaryColor,
+        // 🎨 Campos de Personalização da Tela de Login
+        login_background_url: config.loginBackgroundUrl || null,
+        login_heading: config.loginHeading || null,
+        login_description: config.loginDescription || null,
         updated_at: new Date().toISOString(),
       };
 
