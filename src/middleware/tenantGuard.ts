@@ -362,7 +362,7 @@ export function useTenantGuard(supabase: SupabaseClient): TenantGuard {
 import { useTenantGuard } from './middleware/tenantGuard';
 
 function App() {
-  const [supabase] = useState(() => createClient(...));
+  const [supabase] = useState(() => getSupabaseClient(...));
   const tenantGuard = useTenantGuard(supabase);
 
   useEffect(() => {

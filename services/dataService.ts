@@ -1,6 +1,7 @@
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { Project, Task, Resource, DailyLog, Tenant, User, PlanTemplate, GlobalConfig, RoleDefinition } from '../types';
 import { authService } from './authService';
+import { getSupabaseClient } from './supabaseClient';
 import { 
   mapProjectFromDb, mapProjectToDb,
   mapTaskFromDb, mapTaskToDb,
@@ -161,17 +162,7 @@ class DataSyncService {
     }
 
     try {
-      instance.supabase = createClient(supabaseUrl, supabaseKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-        },
-        realtime: {
-          params: {
-            eventsPerSecond: 10
-          }
-        }
-      });
+      instance.supabase = getSupabaseClient(supabaseUrl, supabaseKey);
 
       // Iniciar processamento automático da fila a cada 5 segundos
       instance.syncInterval = setInterval(() => {

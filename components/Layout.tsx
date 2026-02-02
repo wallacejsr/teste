@@ -123,7 +123,7 @@ const Layout: React.FC<LayoutProps> = ({
   });
 
   const menuItems = user.role === Role.SUPERADMIN
-    ? (canManageTenants ? filteredMasterMenuItems : [])
+    ? filteredMasterMenuItems
     : filteredClientMenuItems;
   const primaryColor = globalConfig.primaryColor || '#3b82f6';
 

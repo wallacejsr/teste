@@ -7,8 +7,9 @@
 // Data: 2026-01-22
 // ================================================
 
-import { SupabaseClient, createClient, Session, User as SupabaseUser } from '@supabase/supabase-js';
+import { SupabaseClient, Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { User, Role } from '../types';
+import { getSupabaseClient } from './supabaseClient';
 
 // ================================================
 // INTERFACES
@@ -51,15 +52,11 @@ class AuthService {
    */
   initialize(supabaseUrl: string, supabaseKey: string): boolean {
     try {
-      this.supabase = createClient(supabaseUrl, supabaseKey, {
-        auth: {
-          autoRefreshToken: true,
-          persistSession: true,
-          detectSessionInUrl: true,
-        },
-      });
+      if (this.supabase) {
+        return true;
+      }
 
-      console.log('✅ [AuthService] Supabase Auth initialized');
+      this.supabase = getSupabaseClient(supabaseUrl, supabaseKey);
       return true;
     } catch (error) {
       console.error('❌ [AuthService] Failed to initialize:', error);

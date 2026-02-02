@@ -163,8 +163,9 @@ const App: React.FC = () => {
       }
 
       // Inicializar tenant guard para validações de segurança
-      if (dataSyncService.supabase) {
-        tenantGuardRef.current = new TenantGuard(dataSyncService.supabase);
+      const supabaseClient = dataSyncService.getSupabaseClient();
+      if (supabaseClient) {
+        tenantGuardRef.current = new TenantGuard(supabaseClient);
       }
 
       setSyncStatus('online');
@@ -270,8 +271,9 @@ const App: React.FC = () => {
           showNotification('Login realizado com sucesso!', 'success');
           
           // PILAR 4: Inicializar Permission Manager
-          if (user.tenantId && dataSyncService.supabase) {
-            permissionManager.initialize(dataSyncService.supabase, user.tenantId, user.role);
+          const supabaseClient = dataSyncService.getSupabaseClient();
+          if (user.tenantId && supabaseClient) {
+            permissionManager.initialize(supabaseClient, user.tenantId, user.role);
           }
           
           // Carregar dados
@@ -313,7 +315,7 @@ const App: React.FC = () => {
   // SINCRONIZAÇÃO DE ROLE E RESET DE TAB (AGRESSIVA)
   // =====================================================
   useEffect(() => {
-    if (!isLoggedIn || !currentUser.id || currentUser.id === 'anon') return;
+    if (!authInitialized || !isLoggedIn || !currentUser.id || currentUser.id === 'anon') return;
 
     const isSuperAdmin = currentUser.role === Role.SUPERADMIN;
     const isCommonUser = currentUser.role !== Role.SUPERADMIN;
@@ -333,7 +335,7 @@ const App: React.FC = () => {
       setActiveTab('dashboard');
       localStorage.setItem('ep_activeTab', 'dashboard');
     }
-  }, [isLoggedIn, currentUser.role, currentUser.id, activeTab]);
+  }, [authInitialized, isLoggedIn, currentUser.role, currentUser.id, activeTab]);
 
   const loadPlanTemplatesFromSupabase = async () => {
     try {
