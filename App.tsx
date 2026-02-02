@@ -443,14 +443,14 @@ const App: React.FC = () => {
         
         const config = await dataSyncService.loadGlobalConfig();
         
-        if (config && config.softwareName && config.softwareName.trim() !== '') {
-          // ✅ SUCESSO: Dados REAIS do banco
-          console.log('✅ [App] Branding carregado do banco:', {
-            nome: config.softwareName,
-            cor: config.primaryColor,
-            logo: config.systemLogoUrl ? 'Sim' : 'Não',
-            loginBg: config.loginBackgroundUrl ? 'Sim' : 'Não'
-          });
+        console.log('🔍 [App] Config retornado:', config);
+        console.log('🔍 [App] softwareName:', config?.softwareName);
+        console.log('🔍 [App] softwareName tipo:', typeof config?.softwareName);
+        console.log('🔍 [App] softwareName length:', config?.softwareName?.length);
+        
+        if (config) {
+          // ✅ ACEITAR qualquer config que retornar do banco (mesmo se campos vazios)
+          console.log('✅ [App] Config válido retornado do banco, aplicando...');
           
           setGlobalConfig(config);
           localStorage.setItem('ep_global_config', JSON.stringify(config));
@@ -460,11 +460,17 @@ const App: React.FC = () => {
             document.documentElement.style.setProperty('--primary-color', config.primaryColor);
           }
           
+          console.log('✅ [App] Branding aplicado:', {
+            nome: config.softwareName || '(vazio)',
+            cor: config.primaryColor,
+            logo: config.systemLogoUrl ? 'Sim' : 'Não'
+          });
+          
           setBrandingReady(true);
           return; // ✅ Sucesso, sair da função
         } else {
-          // ⚠️ Config retornou vazio ou inválido
-          console.warn(`⚠️ [App] Tentativa ${attempt} - Config vazio ou inválido:`, config);
+          // ⚠️ Config retornou NULL
+          console.warn(`⚠️ [App] Tentativa ${attempt} - loadGlobalConfig retornou NULL`);
           
           if (attempt < MAX_RETRIES) {
             console.log(`🔄 [App] Aguardando ${RETRY_DELAY}ms antes de tentar novamente...`);
@@ -483,16 +489,12 @@ const App: React.FC = () => {
       }
     }
     
-    // 🚨 FALHA APÓS TODAS AS TENTATIVAS: NÃO liberar UI, ficar no ModernLoading
+    // 🚨 FALHA APÓS TODAS AS TENTATIVAS
     console.error('🚨 [App] FALHA CRÍTICA: Não foi possível carregar branding do banco após 3 tentativas!');
-    console.error('🚨 [App] Sistema permanecerá no ModernLoading. Verifique:');
-    console.error('   1. Supabase está configurado corretamente?');
-    console.error('   2. Tabela global_configs existe?');
-    console.error('   3. Há pelo menos 1 registro na tabela?');
-    console.error('   4. Campos software_name, primary_color estão preenchidos?');
+    console.error('🚨 [App] loadGlobalConfig retornou NULL em todas as tentativas');
+    console.error('🚨 [App] Verifique os logs [DataSync] acima para mais detalhes');
     
     // ⚠️ NÃO setar brandingReady(true) - sistema fica travado no ModernLoading
-    // Isso força o usuário/dev a corrigir o problema no banco
   };
   
   // 🖼️ PRELOAD DA IMAGEM DE FUNDO: Carregar em memória ANTES de revelar LoginView
