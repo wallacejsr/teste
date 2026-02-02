@@ -445,14 +445,35 @@ const App: React.FC = () => {
           document.documentElement.style.setProperty('--primary-color', config.primaryColor);
         }
         
-        // 🔒 Marcar branding como pronto (previne ghost branding)
+        console.log('✅ [App] Branding carregado do banco:', config.softwareName);
+        // 🔒 Marcar branding como pronto SOMENTE se carregou do banco
         setBrandingReady(true);
       } else {
-        // Se não houver config no banco, usar valores padrão mas marcar como pronto
+        // ❌ NÃO HOUVER CONFIG NO BANCO: Criar padrão consistente
+        console.warn('⚠️ [App] Nenhuma config no banco, usando padrões');
+        const defaultConfig: GlobalConfig = {
+          softwareName: 'SISTEMA',
+          systemLogoUrl: '',
+          primaryColor: '#3b82f6',
+          loginHeading: 'Bem-vindo',
+          loginDescription: 'Faça login para acessar o sistema'
+        };
+        setGlobalConfig(defaultConfig);
+        localStorage.setItem('ep_global_config', JSON.stringify(defaultConfig));
         setBrandingReady(true);
       }
     } catch (error) {
-      // Em caso de erro, marcar como pronto para não travar a UI
+      // 🚨 ERRO: Usar padrões mas logar erro
+      console.error('❌ [App] Erro ao carregar branding:', error);
+      const defaultConfig: GlobalConfig = {
+        softwareName: 'SISTEMA',
+        systemLogoUrl: '',
+        primaryColor: '#3b82f6',
+        loginHeading: 'Bem-vindo',
+        loginDescription: 'Faça login para acessar o sistema'
+      };
+      setGlobalConfig(defaultConfig);
+      localStorage.setItem('ep_global_config', JSON.stringify(defaultConfig));
       setBrandingReady(true);
     }
   };

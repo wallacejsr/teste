@@ -10,6 +10,10 @@ interface ModernLoadingProps {
 export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig }) => {
   const logoUrl = globalConfig?.systemLogoUrl;
   const primaryColor = globalConfig?.primaryColor || '#3b82f6';
+  // 🎨 Usar nome do config OU "Carregando" se estiver vazio (primeira inicialização)
+  const displayName = globalConfig?.softwareName && globalConfig.softwareName.trim() !== '' 
+    ? globalConfig.softwareName 
+    : 'Carregando';
 
   return (
     <motion.div
@@ -83,7 +87,7 @@ export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig }) =>
             }}
             className="text-xl font-bold text-white tracking-wide"
           >
-            {globalConfig?.softwareName || 'Carregando'}
+            {displayName}
           </motion.h1>
           <motion.p
             animate={{ opacity: [0.5, 0.8, 0.5] }}
