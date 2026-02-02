@@ -53,7 +53,6 @@ export class MercadoPagoService {
 
       return await response.json();
     } catch (error) {
-      console.error('[MercadoPagoService] Error creating payment:', error);
       throw error;
     }
   }
@@ -72,7 +71,6 @@ export class MercadoPagoService {
       const data = await response.json();
       return this.mapStatus(data.status);
     } catch (error) {
-      console.error('[MercadoPagoService] Error fetching status:', error);
       return 'failed';
     }
   }
@@ -96,8 +94,6 @@ export class MercadoPagoService {
    */
   static async handleWebhook(payload: any, signature: string, secret: string) {
     // Nota: Em produção, validar a assinatura usando a biblioteca do MP
-    console.log('[MercadoPagoWebhook] Received event:', payload.action);
-    
     if (payload.type === 'payment') {
         const paymentId = payload.data.id;
         // 1. Logar evento

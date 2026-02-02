@@ -155,7 +155,6 @@ const App: React.FC = () => {
       });
       
       if (!authInit || !dataInit) {
-        console.error('[App] Failed to initialize Supabase');
         setSyncStatus('offline');
         setAuthInitialized(true);
         loadFromLocalStorage();
@@ -345,8 +344,7 @@ const App: React.FC = () => {
         localStorage.setItem('ep_plans_config', JSON.stringify(templates));
       }
     } catch (error) {
-      console.error('[App] Error loading plan templates:', error);
-    }
+      }
   };
 
   const loadGlobalConfigFromSupabase = async () => {
@@ -362,8 +360,7 @@ const App: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error('[App] Error loading global config:', error);
-    }
+      }
   };
 
   // Carregar dados do Supabase
@@ -407,7 +404,6 @@ const App: React.FC = () => {
       setSyncStatus('online');
       showNotification('✅ Dados sincronizados com sucesso', 'success');
     } catch (error) {
-      console.error('[App] Error loading from Supabase:', error);
       setSyncStatus('offline');
       showNotification('⚠️ Erro ao carregar dados. Usando backup local.', 'warning');
       loadFromLocalStorage();
@@ -451,10 +447,6 @@ const App: React.FC = () => {
       const result = await tenantGuardRef.current!.validateCurrentUser();
       
       if (!result.isValid && result.shouldLogout) {
-        console.error(
-          '🔴 [SEGURANÇA] Sessão inválida detectada:',
-          result.error
-        );
         showNotification(
           `⚠️ Sessão encerrada: ${result.error}`,
           'error'
@@ -500,8 +492,7 @@ const App: React.FC = () => {
       try {
         await syncProjectsWithSupabase(projects);
       } catch (error) {
-        console.error('[App] Failed to sync projects:', error);
-      }
+        }
     };
 
     // Pequeno delay para evitar múltiplas sincronizações rápidas
@@ -519,8 +510,7 @@ const App: React.FC = () => {
       try {
         await syncResourcesWithSupabase(resources);
       } catch (error) {
-        console.error('[App] Failed to sync resources:', error);
-      }
+        }
     };
 
     const timer = setTimeout(syncWithDelay, 500);
@@ -537,8 +527,7 @@ const App: React.FC = () => {
       try {
         await syncDailyLogsWithSupabase(dailyLogs);
       } catch (error) {
-        console.error('[App] Failed to sync daily logs:', error);
-      }
+        }
     };
 
     const timer = setTimeout(syncWithDelay, 1000);
@@ -655,7 +644,6 @@ const App: React.FC = () => {
       }
       setSyncStatus('online');
     } catch (error) {
-      console.error('[App] Error syncing tasks:', error);
       setSyncStatus('offline');
       showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
     }
@@ -680,7 +668,6 @@ const App: React.FC = () => {
       
       setSyncStatus('online');
     } catch (error: any) {
-      console.error('[App] Error syncing projects:', error);
       setSyncStatus('offline');
       showNotification(
         `⚠️ Erro ao sincronizar: ${error.message || 'Dados salvos localmente'}`,
@@ -707,7 +694,6 @@ const App: React.FC = () => {
       }
       setSyncStatus('online');
     } catch (error) {
-      console.error('[App] Error syncing resources:', error);
       setSyncStatus('offline');
       showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
     }
@@ -731,7 +717,6 @@ const App: React.FC = () => {
       }
       setSyncStatus('online');
     } catch (error) {
-      console.error('[App] Error syncing daily logs:', error);
       setSyncStatus('offline');
       showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
     }

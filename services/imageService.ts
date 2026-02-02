@@ -211,7 +211,6 @@ export async function uploadImage(
 
     return publicUrl.publicUrl;
   } catch (err: any) {
-    console.error('Erro ao fazer upload:', err);
     throw new Error(`Upload falhou: ${err.message}`);
   }
 }
@@ -255,7 +254,6 @@ export async function getPresignedUrl(
 
     return data.signedUrl;
   } catch (err: any) {
-    console.error('Erro ao gerar presigned URL:', err);
     throw new Error(`Presigned URL falhou: ${err.message}`);
   }
 }
@@ -280,7 +278,6 @@ export async function deleteImage(
     const cacheKey = `${bucket}/${filePath}`;
     presignedUrlCache.delete(cacheKey);
   } catch (err: any) {
-    console.error('Erro ao deletar imagem:', err);
     throw new Error(`Delete falhou: ${err.message}`);
   }
 }
@@ -302,7 +299,6 @@ export async function listImages(
 
     return data.map(file => file.name);
   } catch (err: any) {
-    console.error('Erro ao listar imagens:', err);
     throw new Error(`List falhou: ${err.message}`);
   }
 }

@@ -34,7 +34,6 @@ export function usePermission(resource: Resource, action: Action): UsePermission
         const result = await permissionManager.checkPermission(resource, action);
         setAllowed(result.allowed);
       } catch (err: any) {
-        console.error('[usePermission] Error:', err);
         setError(err.message || 'Erro ao verificar permissão');
         setAllowed(false);
       } finally {
@@ -78,7 +77,6 @@ export function usePermissions(
         const allAllowed = Array.from(permResults.values()).every((p) => p);
         setAllowed(allAllowed);
       } catch (err: any) {
-        console.error('[usePermissions] Error:', err);
         setError(err.message || 'Erro ao verificar permissões');
         setAllowed(false);
       } finally {
@@ -114,7 +112,6 @@ export function usePermissionWithRefresh(
       const result = await permissionManager.checkPermission(resource, action);
       setAllowed(result.allowed);
     } catch (err: any) {
-      console.error('[usePermissionWithRefresh] Error:', err);
       setError(err.message);
       setAllowed(false);
     } finally {
@@ -145,7 +142,6 @@ export function useMyPermissions() {
       const perms = permissionManager.getMyPermissions();
       setPermissions(perms);
     } catch (err: any) {
-      console.error('[useMyPermissions] Error:', err);
       setError(err.message);
     } finally {
       setLoading(false);

@@ -132,7 +132,7 @@ export const AuditView: React.FC = () => {
         .from('permission_audit_log')
         .select(`
           *,
-          users:user_id (
+          users!user_id (
             nome
           )
         `)
@@ -154,7 +154,6 @@ export const AuditView: React.FC = () => {
       setLogs(processedLogs);
       calculateStats(processedLogs);
     } catch (err) {
-      console.error('Erro ao carregar logs de auditoria:', err);
       setError('Falha ao carregar logs de auditoria');
     } finally {
       setLoading(false);
@@ -191,7 +190,7 @@ export const AuditView: React.FC = () => {
         .from('security_logs')
         .select(`
           *,
-          users:user_id (
+          users!user_id (
             nome
           )
         `)
@@ -212,7 +211,6 @@ export const AuditView: React.FC = () => {
 
       setSecurityLogs(processedLogs);
     } catch (err) {
-      console.error('Erro ao carregar logs de segurança:', err);
       setSecurityError('Falha ao carregar logs de segurança');
     } finally {
       setSecurityLoading(false);

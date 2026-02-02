@@ -32,8 +32,7 @@ export class PermissionManager {
     this.supabase = supabase;
     this.currentTenantId = tenantId;
     this.currentUserRole = userRole;
-    console.log(`[PermissionManager] Initialized for tenant: ${tenantId}, role: ${userRole}`);
-  }
+    }
 
   /**
    * Verificar se usuário tem permissão para recurso/ação
@@ -118,8 +117,6 @@ export class PermissionManager {
         cached: false,
       };
     } catch (error) {
-      console.error('[PermissionManager] Error checking permission:', error);
-
       // Em caso de erro, usar ROLE_PERMISSIONS local como fallback
       const allowed = hasPermission(this.currentUserRole, resource, action);
       return {
@@ -178,8 +175,7 @@ export class PermissionManager {
     if (!resource || !action) {
       // Limpar tudo
       this.cache.clear();
-      console.log('[PermissionManager] Cache cleared');
-    } else {
+      } else {
       // Limpar específico
       const keysToDelete: string[] = [];
       for (const key of this.cache.keys()) {
@@ -188,8 +184,7 @@ export class PermissionManager {
         }
       }
       keysToDelete.forEach((key) => this.cache.delete(key));
-      console.log(`[PermissionManager] Cache cleared for ${resource}:${action}`);
-    }
+      }
   }
 
   /**
@@ -203,7 +198,6 @@ export class PermissionManager {
     reason?: string
   ): Promise<boolean> {
     if (!this.supabase || !this.currentTenantId) {
-      console.error('[PermissionManager] Not initialized properly');
       return false;
     }
 
@@ -218,14 +212,11 @@ export class PermissionManager {
       });
 
       if (error) {
-        console.error('[PermissionManager] Error granting temp permission:', error);
         return false;
       }
 
-      console.log(`✅ [PermissionManager] Temp permission granted: ${userId} -> ${resource}:${action}`);
       return true;
     } catch (error) {
-      console.error('[PermissionManager] Exception:', error);
       return false;
     }
   }
@@ -248,13 +239,11 @@ export class PermissionManager {
         .single();
 
       if (userError || !user) {
-        console.error('[PermissionManager] Error fetching user:', userError);
         return [];
       }
 
       return ROLE_PERMISSIONS[user.role as Role] || [];
     } catch (error) {
-      console.error('[PermissionManager] Exception:', error);
       return [];
     }
   }
@@ -275,13 +264,11 @@ export class PermissionManager {
         .limit(limit);
 
       if (error) {
-        console.error('[PermissionManager] Error fetching audit log:', error);
         return [];
       }
 
       return data || [];
     } catch (error) {
-      console.error('[PermissionManager] Exception:', error);
       return [];
     }
   }
@@ -291,12 +278,10 @@ export class PermissionManager {
    */
   async updateUserRole(userId: string, newRole: Role): Promise<boolean> {
     if (!this.supabase) {
-      console.error('[PermissionManager] Not initialized');
       return false;
     }
 
     if (this.currentUserRole !== Role.ADMIN) {
-      console.error('[PermissionManager] Only admin can update roles');
       return false;
     }
 
@@ -307,15 +292,12 @@ export class PermissionManager {
         .eq('id', userId);
 
       if (error) {
-        console.error('[PermissionManager] Error updating role:', error);
         return false;
       }
 
-      console.log(`✅ [PermissionManager] User role updated: ${userId} -> ${newRole}`);
       this.clearCache(); // Limpar cache após mudança
       return true;
     } catch (error) {
-      console.error('[PermissionManager] Exception:', error);
       return false;
     }
   }

@@ -67,7 +67,6 @@ const EquipeView: React.FC<EquipeViewProps> = ({
           setRoles(fetched);
         }
       } catch (error) {
-        console.error('[EquipeView] Error loading roles', error);
         if (isMounted) {
           setRoles([]);
         }
@@ -228,7 +227,6 @@ const EquipeView: React.FC<EquipeViewProps> = ({
       setShowAddModal(false);
       resetForm();
     } catch (error) {
-      console.error('[EquipeView] Error saving data', error);
       toast.error('Não foi possível salvar. Tente novamente.');
     }
   };
@@ -241,7 +239,6 @@ const EquipeView: React.FC<EquipeViewProps> = ({
       await dataSyncService.deleteRole(roleId, activeTenant.id);
       setRoles(prev => prev.filter(r => r.id !== roleId));
     } catch (error) {
-      console.error('[EquipeView] Error deleting role', error);
       toast.error('Não foi possível remover o cargo.');
     }
   };
