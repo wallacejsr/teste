@@ -70,14 +70,19 @@ const App: React.FC = () => {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
   
+  // 🎨 ANTI-FLICKER: Inicializar com valores vazios para evitar 'ghost branding' (ex: PROJEX MASTER)
+  // Valores reais serão carregados do banco ANTES de authInitialized=true
   const [globalConfig, setGlobalConfig] = useState<GlobalConfig>(() => {
     const saved = localStorage.getItem('ep_global_config');
     return saved ? JSON.parse(saved) : {
-      softwareName: 'PROJEX MASTER',
+      softwareName: '',
       systemLogoUrl: '',
       primaryColor: '#3b82f6'
     };
   });
+  
+  // 🔒 BRANDING READY: Flag para garantir que branding foi carregado antes de mostrar UI
+  const [brandingReady, setBrandingReady] = useState(false);
 
   const [plansConfig, setPlansConfig] = useState<PlanTemplate[]>(() => {
     const saved = localStorage.getItem('ep_plans_config');
@@ -433,9 +438,17 @@ const App: React.FC = () => {
         if (config.primaryColor) {
           document.documentElement.style.setProperty('--primary-color', config.primaryColor);
         }
+        
+        // 🔒 Marcar branding como pronto (previne ghost branding)
+        setBrandingReady(true);
+      } else {
+        // Se não houver config no banco, usar valores padrão mas marcar como pronto
+        setBrandingReady(true);
       }
     } catch (error) {
-      }
+      // Em caso de erro, marcar como pronto para não travar a UI
+      setBrandingReady(true);
+    }
   };
 
   // Carregar dados do Supabase
@@ -1078,7 +1091,9 @@ const App: React.FC = () => {
     return false;
   }, [currentUser.id, currentUser.role, tenants.length]);
   
-  if (!authInitialized || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
+  // 🎨 BLINDAGEM DE IDENTIDADE: Aguardar branding estar pronto ANTES de liberar UI
+  // Previne exibição de 'PROJEX MASTER' ou valores vazios
+  if (!authInitialized || !brandingReady || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
     return <ModernLoading globalConfig={globalConfig} />;
   }
 
