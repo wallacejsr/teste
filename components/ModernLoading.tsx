@@ -5,16 +5,26 @@ import { GlobalConfig } from '../types';
 
 interface ModernLoadingProps {
   globalConfig?: GlobalConfig;
+  showError?: boolean; // 🚨 Mostrar erro se demorar muito
 }
 
-export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig }) => {
+export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig, showError = false }) => {
   const logoUrl = globalConfig?.systemLogoUrl;
   const primaryColor = globalConfig?.primaryColor || '#3b82f6';
   // 🎨 Usar nome do config OU "Carregando" se estiver vazio (primeira inicialização)
   const displayName = globalConfig?.softwareName && globalConfig.softwareName.trim() !== '' 
     ? globalConfig.softwareName 
-    : 'Carregando';
-
+    : 'Carregando';  
+  const [showErrorMessage, setShowErrorMessage] = React.useState(false);
+  
+  // ⏱️ Mostrar erro se demorar mais de 10 segundos
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowErrorMessage(true);
+    }, 10000); // 10 segundos
+    
+    return () => clearTimeout(timer);
+  }, []);
   return (
     <motion.div
       initial={{ opacity: 1 }}
@@ -101,6 +111,22 @@ export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig }) =>
           >
             Preparando seu ambiente...
           </motion.p>
+          
+          {/* 🚨 Mensagem de erro após 10 segundos */}
+          {showErrorMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg max-w-md"
+            >
+              <p className="text-red-400 text-xs font-medium text-center mb-2">
+                ⚠️ Erro ao carregar configurações do banco
+              </p>
+              <p className="text-slate-400 text-xs text-center">
+                Verifique o console (F12) para mais detalhes
+              </p>
+            </motion.div>
+          )}
         </div>
 
         {/* Dots de progresso */}

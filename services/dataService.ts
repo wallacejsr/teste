@@ -577,44 +577,56 @@ class DataSyncService {
    */
   async loadGlobalConfig(): Promise<GlobalConfig | null> {
     if (!this.supabase) {
-      console.warn('[DataSync] Supabase not initialized, cannot load global config');
+      console.error('[DataSync] ❌ Supabase not initialized!');
       return null;
     }
 
     try {
+      console.log('[DataSync] 🔍 Buscando global_configs no Supabase...');
+      
+      // 🔧 Buscar QUALQUER registro (não apenas .single())
       const { data, error } = await this.supabase
         .from('global_configs')
         .select('*')
-        .single();
+        .limit(1);
 
       if (error) {
-        // Se não existe ainda, retornar config padrão
-        if (error.code === 'PGRST116') {
-          console.warn('[DataSync] No global config found in database, using defaults');
-          return null;
-        }
-        console.error('[DataSync] Error loading global config:', error);
+        console.error('[DataSync] ❌ Erro ao buscar global_configs:', error);
         return null;
       }
 
+      if (!data || data.length === 0) {
+        console.warn('[DataSync] ⚠️ Tabela global_configs está VAZIA!');
+        console.warn('[DataSync] Execute a migration SQL: migrations/add_login_customization_fields.sql');
+        return null;
+      }
+
+      const row = data[0];
+      console.log('[DataSync] 📊 Registro encontrado:', {
+        software_name: row.software_name,
+        primary_color: row.primary_color,
+        has_logo: !!row.system_logo_url,
+        has_login_bg: !!row.login_background_url
+      });
+
       const config: GlobalConfig = {
-        softwareName: data.software_name || 'PROJEX MASTER',
-        softwareSubtitle: data.software_subtitle || '',
-        systemLogoUrl: data.system_logo_url || '',
-        primaryColor: data.primary_color || '#3b82f6',
-        gatewayType: data.gateway_type || undefined,
-        publicKey: data.public_key || undefined,
-        secretKey: data.secret_key || undefined,
+        softwareName: row.software_name || '',
+        softwareSubtitle: row.software_subtitle || '',
+        systemLogoUrl: row.system_logo_url || '',
+        primaryColor: row.primary_color || '#3b82f6',
+        gatewayType: row.gateway_type || undefined,
+        publicKey: row.public_key || undefined,
+        secretKey: row.secret_key || undefined,
         // 🎨 Personalização da Tela de Login
-        loginBackgroundUrl: data.login_background_url || '',
-        loginHeading: data.login_heading || '',
-        loginDescription: data.login_description || '',
+        loginBackgroundUrl: row.login_background_url || '',
+        loginHeading: row.login_heading || '',
+        loginDescription: row.login_description || '',
       };
 
-      console.log('[DataSync] Global config loaded successfully');
+      console.log('[DataSync] ✅ Global config carregado com sucesso!');
       return config;
     } catch (error) {
-      console.error('[DataSync] Exception loading global config:', error);
+      console.error('[DataSync] 🚨 Exception ao carregar global config:', error);
       return null;
     }
   }

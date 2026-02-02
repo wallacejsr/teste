@@ -434,48 +434,65 @@ const App: React.FC = () => {
   };
 
   const loadGlobalConfigFromSupabase = async () => {
-    try {
-      const config = await dataSyncService.loadGlobalConfig();
-      if (config) {
-        setGlobalConfig(config);
-        localStorage.setItem('ep_global_config', JSON.stringify(config));
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 segundo
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`🔍 [App] Tentativa ${attempt}/${MAX_RETRIES} - Carregando branding do banco...`);
         
-        // Aplicar primaryColor ao CSS root para tema global
-        if (config.primaryColor) {
-          document.documentElement.style.setProperty('--primary-color', config.primaryColor);
+        const config = await dataSyncService.loadGlobalConfig();
+        
+        if (config && config.softwareName && config.softwareName.trim() !== '') {
+          // ✅ SUCESSO: Dados REAIS do banco
+          console.log('✅ [App] Branding carregado do banco:', {
+            nome: config.softwareName,
+            cor: config.primaryColor,
+            logo: config.systemLogoUrl ? 'Sim' : 'Não',
+            loginBg: config.loginBackgroundUrl ? 'Sim' : 'Não'
+          });
+          
+          setGlobalConfig(config);
+          localStorage.setItem('ep_global_config', JSON.stringify(config));
+          
+          // Aplicar primaryColor ao CSS root
+          if (config.primaryColor) {
+            document.documentElement.style.setProperty('--primary-color', config.primaryColor);
+          }
+          
+          setBrandingReady(true);
+          return; // ✅ Sucesso, sair da função
+        } else {
+          // ⚠️ Config retornou vazio ou inválido
+          console.warn(`⚠️ [App] Tentativa ${attempt} - Config vazio ou inválido:`, config);
+          
+          if (attempt < MAX_RETRIES) {
+            console.log(`🔄 [App] Aguardando ${RETRY_DELAY}ms antes de tentar novamente...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            continue; // Tentar novamente
+          }
         }
+      } catch (error) {
+        console.error(`❌ [App] Tentativa ${attempt} - Erro ao carregar branding:`, error);
         
-        console.log('✅ [App] Branding carregado do banco:', config.softwareName);
-        // 🔒 Marcar branding como pronto SOMENTE se carregou do banco
-        setBrandingReady(true);
-      } else {
-        // ❌ NÃO HOUVER CONFIG NO BANCO: Criar padrão consistente
-        console.warn('⚠️ [App] Nenhuma config no banco, usando padrões');
-        const defaultConfig: GlobalConfig = {
-          softwareName: 'SISTEMA',
-          systemLogoUrl: '',
-          primaryColor: '#3b82f6',
-          loginHeading: 'Bem-vindo',
-          loginDescription: 'Faça login para acessar o sistema'
-        };
-        setGlobalConfig(defaultConfig);
-        localStorage.setItem('ep_global_config', JSON.stringify(defaultConfig));
-        setBrandingReady(true);
+        if (attempt < MAX_RETRIES) {
+          console.log(`🔄 [App] Aguardando ${RETRY_DELAY}ms antes de tentar novamente...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          continue; // Tentar novamente
+        }
       }
-    } catch (error) {
-      // 🚨 ERRO: Usar padrões mas logar erro
-      console.error('❌ [App] Erro ao carregar branding:', error);
-      const defaultConfig: GlobalConfig = {
-        softwareName: 'SISTEMA',
-        systemLogoUrl: '',
-        primaryColor: '#3b82f6',
-        loginHeading: 'Bem-vindo',
-        loginDescription: 'Faça login para acessar o sistema'
-      };
-      setGlobalConfig(defaultConfig);
-      localStorage.setItem('ep_global_config', JSON.stringify(defaultConfig));
-      setBrandingReady(true);
     }
+    
+    // 🚨 FALHA APÓS TODAS AS TENTATIVAS: NÃO liberar UI, ficar no ModernLoading
+    console.error('🚨 [App] FALHA CRÍTICA: Não foi possível carregar branding do banco após 3 tentativas!');
+    console.error('🚨 [App] Sistema permanecerá no ModernLoading. Verifique:');
+    console.error('   1. Supabase está configurado corretamente?');
+    console.error('   2. Tabela global_configs existe?');
+    console.error('   3. Há pelo menos 1 registro na tabela?');
+    console.error('   4. Campos software_name, primary_color estão preenchidos?');
+    
+    // ⚠️ NÃO setar brandingReady(true) - sistema fica travado no ModernLoading
+    // Isso força o usuário/dev a corrigir o problema no banco
   };
   
   // 🖼️ PRELOAD DA IMAGEM DE FUNDO: Carregar em memória ANTES de revelar LoginView
