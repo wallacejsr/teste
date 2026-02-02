@@ -175,21 +175,29 @@ const App: React.FC = () => {
   // =====================================================
   useEffect(() => {
     const initializeSupabase = async () => {
+      console.log('🚀 [App] Iniciando inicialização do sistema...');
+      
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+      console.log('🔑 [App] Supabase URL:', supabaseUrl ? 'Configurado' : '❌ AUSENTE');
+      console.log('🔑 [App] Supabase Key:', supabaseKey ? 'Configurado' : '❌ AUSENTE');
+
       if (!supabaseUrl || !supabaseKey) {
+        console.error('❌ [App] Supabase não configurado! Sistema ficará offline.');
         setSyncStatus('offline');
         setAuthInitialized(true);
         loadFromLocalStorage();
         return;
       }
 
-      // Inicializar o serviço de autenticação (PILAR 3)
+      console.log('🔧 [App] Inicializando authService...');
       const authInit = authService.initialize(supabaseUrl, supabaseKey);
+      console.log('🔧 [App] authService inicializado:', authInit ? '✅' : '❌');
       
-      // Inicializar o serviço de sincronização (SINGLETON - chamado apenas uma vez)
+      console.log('🔧 [App] Inicializando DataSyncService...');
       const dataInit = DataSyncService.initialize(supabaseUrl, supabaseKey);
+      console.log('🔧 [App] DataSyncService inicializado:', dataInit ? '✅' : '❌');
       
       // Obter instância singleton para uso posterior
       const dataSyncInstance = DataSyncService.getInstance();
@@ -200,6 +208,7 @@ const App: React.FC = () => {
       });
       
       if (!authInit || !dataInit) {
+        console.error('❌ [App] Falha na inicialização! Sistema ficará offline.');
         setSyncStatus('offline');
         setAuthInitialized(true);
         loadFromLocalStorage();
@@ -208,11 +217,14 @@ const App: React.FC = () => {
 
       // Inicializar tenant guard para validações de segurança
       const supabaseClient = dataSyncService.getSupabaseClient();
+      console.log('🔧 [App] Supabase client obtido:', supabaseClient ? '✅' : '❌');
+      
       if (supabaseClient) {
         tenantGuardRef.current = new TenantGuard(supabaseClient);
       }
 
       setSyncStatus('online');
+      console.log('✅ [App] Sistema ONLINE! Iniciando carregamento de branding...');
 
       // 🎨 PRIORIDADE 1: Carregar BRANDING primeiro (anti-flicker)
       // Configurar marca/cores ANTES de authInitialized=true para evitar flashes

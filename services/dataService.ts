@@ -576,13 +576,17 @@ class DataSyncService {
    * Carregar configuração global do sistema (branding, cores, logos)
    */
   async loadGlobalConfig(): Promise<GlobalConfig | null> {
+    console.log('🔍 [DataSync] ============================================');
+    console.log('🔍 [DataSync] loadGlobalConfig INICIADO');
+    console.log('🔍 [DataSync] Supabase client existe?', this.supabase ? '✅ SIM' : '❌ NÃO');
+    
     if (!this.supabase) {
-      console.error('[DataSync] ❌ Supabase not initialized!');
+      console.error('❌ [DataSync] ERRO CRÍTICO: Supabase client é NULL!');
       return null;
     }
 
     try {
-      console.log('[DataSync] 🔍 Buscando global_configs no Supabase...');
+      console.log('🔍 [DataSync] Tentando buscar global_configs...');
       
       // 🔧 Buscar QUALQUER registro (não apenas .single())
       const { data, error } = await this.supabase
@@ -590,19 +594,24 @@ class DataSyncService {
         .select('*')
         .limit(1);
 
+      console.log('🔍 [DataSync] Query executada. Resultado:');
+      console.log('  - data:', data);
+      console.log('  - data.length:', data?.length);
+      console.log('  - error:', error);
+
       if (error) {
-        console.error('[DataSync] ❌ Erro ao buscar global_configs:', error);
+        console.error('❌ [DataSync] Erro ao buscar global_configs:', error);
         return null;
       }
 
       if (!data || data.length === 0) {
-        console.warn('[DataSync] ⚠️ Tabela global_configs está VAZIA!');
+        console.warn('⚠️ [DataSync] Tabela global_configs está VAZIA!');
         console.warn('[DataSync] Execute a migration SQL: migrations/add_login_customization_fields.sql');
         return null;
       }
 
       const row = data[0];
-      console.log('[DataSync] 📊 Registro encontrado:', {
+      console.log('📊 [DataSync] Registro encontrado:', {
         software_name: row.software_name,
         primary_color: row.primary_color,
         has_logo: !!row.system_logo_url,
@@ -623,10 +632,12 @@ class DataSyncService {
         loginDescription: row.login_description || '',
       };
 
-      console.log('[DataSync] ✅ Global config carregado com sucesso!');
+      console.log('✅ [DataSync] Global config carregado com sucesso!');
+      console.log('✅ [DataSync] Config final:', config);
+      console.log('🔍 [DataSync] ============================================');
       return config;
     } catch (error) {
-      console.error('[DataSync] 🚨 Exception ao carregar global config:', error);
+      console.error('🚨 [DataSync] Exception ao carregar global config:', error);
       return null;
     }
   }
