@@ -203,16 +203,17 @@ const App: React.FC = () => {
 
       setSyncStatus('online');
 
-      // Carregar templates de planos direto do Supabase
-      await loadPlanTemplatesFromSupabase();
-      
-      // Carregar configuração global (branding) do Supabase
+      // 🎨 PRIORIDADE 1: Carregar BRANDING primeiro (anti-flicker)
+      // Configurar marca/cores ANTES de authInitialized=true para evitar flashes
       await loadGlobalConfigFromSupabase();
+      
+      // PRIORIDADE 2: Carregar templates de planos
+      await loadPlanTemplatesFromSupabase();
       
       // Carregar fila de sincronização pendente
       dataSyncService.loadQueueFromStorage();
 
-      // Verificar sessão existente (PILAR 3)
+      // PRIORIDADE 3: Verificar sessão existente (PILAR 3)
       const session = await authService.getSession();
       if (session) {
         const user = await authService.getCurrentUser();
@@ -227,8 +228,15 @@ const App: React.FC = () => {
           // Limpar cache antigo de permissões (força revalidação)
           permissionManager.clearCache();
           
-          // Carregar dados se não for master
-          if (user.tenantId && user.role !== Role.SUPERADMIN) {
+          // 🔑 PRIORIDADE 4: Carregar dados conforme role
+          if (user.role === Role.SUPERADMIN) {
+            // SUPERADMIN: Carregar TODOS os tenants para Gestão de Empresas
+            const allTenantsData = await dataSyncService.loadAllTenants();
+            setTenants(allTenantsData);
+            const allUsersData = await dataSyncService.loadAllUsers();
+            setAllUsers(allUsersData);
+          } else if (user.tenantId) {
+            // User regular: Carregar dados do seu tenant
             await loadDataFromSupabase();
           }
         }
@@ -247,6 +255,7 @@ const App: React.FC = () => {
         }
       }
 
+      // ✅ authInitialized=true APENAS APÓS branding + dados carregados
       setAuthInitialized(true);
     };
 
@@ -334,7 +343,7 @@ const App: React.FC = () => {
             permissionManager.initialize(supabaseClient, user.tenantId, user.role);
           }
           
-          // Carregar dados
+          // Carregar dados conforme role
           if (user.role === Role.SUPERADMIN) {
             // SUPERADMIN: Carregar TODOS os tenants para Gestão de Empresas
             const allTenantsData = await dataSyncService.loadAllTenants();
@@ -1047,8 +1056,22 @@ const App: React.FC = () => {
   // =====================================================
   // AUTH GUARD - Prevenir race condition no refresh
   // =====================================================
-  // CRÍTICO: Aguardar role estar definida para evitar "Acesso Negado" no SUPERADMIN
-  const isRoleLoaded = currentUser.id !== 'anon' && currentUser.role !== undefined;
+  // CRÍTICO: Aguardar role estar definida E dados carregados para evitar "Acesso Negado" no SUPERADMIN
+  const isRoleLoaded = useMemo(() => {
+    const hasValidUser = currentUser.id !== 'anon' && currentUser.role !== undefined;
+    
+    // Se não é SUPERADMIN, basta ter role válida
+    if (hasValidUser && currentUser.role !== Role.SUPERADMIN) {
+      return true;
+    }
+    
+    // Se é SUPERADMIN, aguardar tenants carregados (previne activeTenant=null)
+    if (hasValidUser && currentUser.role === Role.SUPERADMIN) {
+      return tenants.length > 0;
+    }
+    
+    return false;
+  }, [currentUser.id, currentUser.role, tenants.length]);
   
   if (!authInitialized || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
     return <ModernLoading globalConfig={globalConfig} />;
