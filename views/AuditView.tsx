@@ -341,8 +341,10 @@ export const AuditView: React.FC = () => {
     return colors[action] || 'text-gray-600';
   };
 
-  // Aguardar carregamento de permissões
-  if (permLoading) {
+  // 🔐 PROTEÇÃO CONTRA RACE CONDITION: Aguardar permissionManager estar completamente inicializado
+  // Problema: Durante o refresh (F5), permissionManager.getStatus() pode retornar role=null por alguns milissegundos
+  // Solução: Aguardar permStatus.isInitialized=true E authReady=true ANTES de verificar acesso
+  if (permLoading || !permStatus.isInitialized || !authReady) {
     return (
       <div className="p-8 text-center">
         <div className="inline-block">
@@ -355,6 +357,7 @@ export const AuditView: React.FC = () => {
     );
   }
 
+  // Verificar acesso SOMENTE após permissionManager estar pronto (previne false negatives)
   if (!hasAuditAccess) {
     return (
       <div className="p-8 text-center">

@@ -320,6 +320,7 @@ export class PermissionManager {
   getStatus() {
     return {
       initialized: this.supabase !== null,
+      isInitialized: this.supabase !== null, // Alias para compatibilidade com componentes
       currentUserRole: this.currentUserRole,
       currentTenantId: this.currentTenantId,
       cacheSize: this.cache.size,

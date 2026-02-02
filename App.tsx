@@ -228,7 +228,12 @@ const App: React.FC = () => {
           // Limpar cache antigo de permissões (força revalidação)
           permissionManager.clearCache();
           
-          // 🔑 PRIORIDADE 4: Carregar dados conforme role
+          // � PILAR 4: Inicializar Permission Manager com credenciais atuais
+          if (user.tenantId && supabaseClient) {
+            permissionManager.initialize(supabaseClient, user.tenantId, user.role);
+          }
+          
+          // �🔑 PRIORIDADE 4: Carregar dados conforme role
           if (user.role === Role.SUPERADMIN) {
             // SUPERADMIN: Carregar TODOS os tenants para Gestão de Empresas
             const allTenantsData = await dataSyncService.loadAllTenants();
