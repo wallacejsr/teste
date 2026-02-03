@@ -393,10 +393,23 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
     });
   }, [allTenants, searchTerm, filterStatus]);
 
-  const handleDeleteTenant = (id: string) => {
-    if (window.confirm(`Excluir organização irreversivelmente?`)) {
+  const handleDeleteTenant = async (id: string) => {
+    if (!window.confirm(`⚠️ ATENÇÃO: Excluir organização irreversivelmente?\n\nEsta ação removerá:\n- Empresa\n- Todos os usuários\n- Todos os projetos\n- Todas as tarefas\n- Todos os diários de obra\n\nDeseja continuar?`)) {
+      return;
+    }
+
+    try {
+      // Chamar banco de dados para exclusão com cascade
+      await dataSyncService.deleteTenant(id);
+      
+      // Atualizar UI após sucesso no banco
       onUpdateTenants(allTenants.filter(t => t.id !== id));
       onUpdateUsers(allUsers.filter(u => u.tenantId !== id));
+      
+      alert('✅ Organização excluída com sucesso!');
+    } catch (error) {
+      console.error('❌ Erro ao excluir tenant:', error);
+      alert(`❌ ERRO: Não foi possível excluir a organização.\n${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 

@@ -511,10 +511,171 @@ class DataSyncService {
         .eq('tenantId', tenantId);
 
       if (error) throw error;
+      console.log(`[DataSync] ✅ Role ${roleId} deleted successfully`);
       return true;
     } catch (error) {
       console.error('[DataSync] Error deleting role:', error);
       this.enqueueOperation('delete', 'roles', { id: roleId }, tenantId);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir tenant (organização) com limpeza em cascata
+   * ATENÇÃO: Remove TODOS os dados associados (usuários, projetos, tarefas, etc)
+   */
+  async deleteTenant(tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete tenant');
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      // ON DELETE CASCADE no schema cuida da limpeza automática
+      const { error } = await this.supabase
+        .from('tenants')
+        .delete()
+        .eq('id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ Tenant ${tenantId} deleted successfully (cascaded to all related data)`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting tenant:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir usuário
+   */
+  async deleteUser(userId: string, tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete user');
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('users')
+        .delete()
+        .eq('id', userId)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ User ${userId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting user:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir projeto/obra
+   * ATENÇÃO: Remove TODAS as tarefas associadas (cascade)
+   */
+  async deleteProject(projectId: string, tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete project');
+      this.enqueueOperation('delete', 'projects', { id: projectId }, tenantId);
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('projects')
+        .delete()
+        .eq('id', projectId)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ Project ${projectId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting project:', error);
+      this.enqueueOperation('delete', 'projects', { id: projectId }, tenantId);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir tarefa
+   */
+  async deleteTask(taskId: string, tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete task');
+      this.enqueueOperation('delete', 'tasks', { id: taskId }, tenantId);
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ Task ${taskId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting task:', error);
+      this.enqueueOperation('delete', 'tasks', { id: taskId }, tenantId);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir recurso (mão de obra ou maquinário)
+   */
+  async deleteResource(resourceId: string, tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete resource');
+      this.enqueueOperation('delete', 'resources', { id: resourceId }, tenantId);
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('resources')
+        .delete()
+        .eq('id', resourceId)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ Resource ${resourceId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting resource:', error);
+      this.enqueueOperation('delete', 'resources', { id: resourceId }, tenantId);
+      throw error;
+    }
+  }
+
+  /**
+   * Excluir diário de obra
+   */
+  async deleteDailyLog(logId: string, tenantId: string): Promise<boolean> {
+    if (!this.supabase) {
+      console.warn('[DataSync] Supabase not initialized, cannot delete daily log');
+      this.enqueueOperation('delete', 'daily_logs', { id: logId }, tenantId);
+      throw new Error('Supabase not initialized');
+    }
+
+    try {
+      const { error } = await this.supabase
+        .from('daily_logs')
+        .delete()
+        .eq('id', logId)
+        .eq('tenant_id', tenantId);
+
+      if (error) throw error;
+      console.log(`[DataSync] ✅ DailyLog ${logId} deleted successfully`);
+      return true;
+    } catch (error) {
+      console.error('[DataSync] Error deleting daily log:', error);
+      this.enqueueOperation('delete', 'daily_logs', { id: logId }, tenantId);
       throw error;
     }
   }
@@ -606,8 +767,22 @@ class DataSyncService {
 
       if (!data || data.length === 0) {
         console.warn('⚠️ [DataSync] Tabela global_configs está VAZIA!');
-        console.warn('[DataSync] Execute a migration SQL: migrations/add_login_customization_fields.sql');
-        return null;
+        console.log('✅ [DataSync] Criando configuração padrão...');
+        
+        // Retornar config padrão ao invés de NULL
+        const defaultConfig: GlobalConfig = {
+          softwareName: 'PROJEX MASTER',
+          softwareSubtitle: 'Gestão Inteligente de Obras',
+          systemLogoUrl: '',
+          primaryColor: '#3b82f6',
+          loginBackgroundUrl: '',
+          loginHeading: 'Bem-vindo',
+          loginDescription: 'Faça login para continuar'
+        };
+        
+        console.log('✅ [DataSync] Config padrão criado:', defaultConfig);
+        console.log('🔍 [DataSync] ============================================');
+        return defaultConfig;
       }
 
       const row = data[0];

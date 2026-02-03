@@ -975,12 +975,22 @@ const App: React.FC = () => {
         onOpenUpgrade={openUpgrade}
         onSelectProject={(p) => { setSelectedProject(p); setActiveTab('planejamento'); }} 
         onAddProject={(p) => setProjects(prev => [...prev.filter(x => x.id !== p.id), { ...p, tenantId: currentUser.tenantId }])} 
-        onRemoveProject={(id) => {
-          setProjects(p => p.filter(x => x.id !== id));
-          // Limpar dailyLogs da obra deletada e resetar selectedProject se necessário
-          setDailyLogs(logs => logs.filter(l => l.obraId !== id));
-          if (selectedProject?.id === id) {
-            setSelectedProject(null);
+        onRemoveProject={async (id) => {
+          try {
+            // 1. Chamar banco de dados para exclusão (cascade remove tasks)
+            await dataSyncService.deleteProject(id, currentUser.tenantId);
+            
+            // 2. Atualizar UI após sucesso
+            setProjects(p => p.filter(x => x.id !== id));
+            setDailyLogs(logs => logs.filter(l => l.obraId !== id));
+            if (selectedProject?.id === id) {
+              setSelectedProject(null);
+            }
+            
+            showNotification('✅ Projeto excluído com sucesso!', 'success');
+          } catch (error) {
+            console.error('❌ Erro ao excluir projeto:', error);
+            showNotification('❌ Erro ao excluir projeto. Tente novamente.', 'error');
           }
         }} 
       />
@@ -1058,7 +1068,16 @@ const App: React.FC = () => {
           syncTasksWithSupabase(sanitized);
         }} 
         onAddDailyLog={(log) => setDailyLogs(prev => [...prev, { ...log, tenantId: currentUser.tenantId }])} 
-        onRemoveDailyLog={(id) => setDailyLogs(l => l.filter(x => x.id !== id))} 
+        onRemoveDailyLog={async (id) => {
+          try {
+            await dataSyncService.deleteDailyLog(id, currentUser.tenantId);
+            setDailyLogs(l => l.filter(x => x.id !== id));
+            showNotification('✅ Diário de obra excluído!', 'success');
+          } catch (error) {
+            console.error('❌ Erro ao excluir diário:', error);
+            showNotification('❌ Erro ao excluir diário.', 'error');
+          }
+        }} 
         dailyLogs={tenantLogs} 
         user={currentUser}
         setActiveTab={setActiveTab}
@@ -1075,12 +1094,16 @@ const App: React.FC = () => {
           projects={tenantProjects} 
           allUsers={tenantUsers} 
           onAddResource={r => setResources(prev => [...prev.filter(x => x.id !== r.id), { ...r, tenantId: currentUser.tenantId }])} 
-          onRemoveResource={(id) => {
-            // Ação 1: Remover o recurso do estado de recursos
-            setResources(prev => prev.filter(r => r.id !== id));
+          onRemoveResource={async (id) => {
+            try {
+              // 1. Chamar banco de dados para exclusão
+              await dataSyncService.deleteResource(id, currentUser.tenantId);
+              
+              // 2. Remover do estado local
+              setResources(prev => prev.filter(r => r.id !== id));
 
-            // Ação 2: Limpeza em cascata nas tarefas (remover alocações vinculadas ao recurso)
-            setTasks(prev => {
+              // 3. Limpeza em cascata nas tarefas (remover alocações vinculadas)
+              setTasks(prev => {
               const otherTenantsTasks = prev.filter(t => t.tenantId !== currentUser.tenantId);
               const updatedTenantTasks = prev
                 .filter(t => t.tenantId === currentUser.tenantId)
@@ -1137,7 +1160,17 @@ const App: React.FC = () => {
 
               return [...otherTenantsTasks, ...updatedTenantTasks];
             });
-          }} 
+            
+            // Sincronizar tarefas atualizadas
+            const updatedTasksList = tasks.filter(t => t.tenantId === currentUser.tenantId);
+            await syncTasksWithSupabase(updatedTasksList);
+            
+            showNotification('✅ Recurso excluído com sucesso!', 'success');
+          } catch (error) {
+            console.error('❌ Erro ao excluir recurso:', error);
+            showNotification('❌ Erro ao excluir recurso.', 'error');
+          }
+        }} 
         />
       );
       case 'config': return <ProfileView plansConfig={plansConfig} user={currentUser} onUpdateUser={setCurrentUser} tenant={tenantForUI} onUpdateTenant={(t) => setTenants(prev => prev.map(item => item.id === t.id ? t : item))} allUsers={tenantUsers} onUpdateUsers={(updatedTenantUsers) => { const otherUsers = allUsers.filter(u => u.tenantId !== currentUser.tenantId); setAllUsers([...otherUsers, ...updatedTenantUsers]); }} globalConfig={globalConfig} onUpdateGlobalConfig={setGlobalConfig} />;
