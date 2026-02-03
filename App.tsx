@@ -15,9 +15,11 @@ import MasterAdminView from './views/MasterAdminView';
 import AuditView from './views/AuditView';
 import UpgradeModal from './components/UpgradeModal';
 import ModernLoading from './components/ModernLoading';
+import ConfirmationDialog from './components/ConfirmationDialog';
+import { useConfirmation } from './hooks/useConfirmation';
 import { User, Project, Task, Resource, DailyLog, Role, Tenant, LicenseStatus, GlobalConfig, PlanTemplate } from './types';
 import { AlertCircle, MessageSquare, Wifi, WifiOff, CheckCircle, Clock } from 'lucide-react';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { dataSyncService } from './services/dataService';
 import { DataSyncService } from './services/dataService';
 import { authService } from './services/authService';
@@ -64,6 +66,9 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ep_activeTab') || 'dashboard');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
+  
+  // Hook de confirmação customizado
+  const confirmation = useConfirmation();
   
   // Estados de sincronização
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'syncing'>('offline');
@@ -976,6 +981,29 @@ const App: React.FC = () => {
         onSelectProject={(p) => { setSelectedProject(p); setActiveTab('planejamento'); }} 
         onAddProject={(p) => setProjects(prev => [...prev.filter(x => x.id !== p.id), { ...p, tenantId: currentUser.tenantId }])} 
         onRemoveProject={async (id) => {
+          const project = projects.find(p => p.id === id);
+          const projectName = project?.nome || 'projeto';
+          
+          // Abrir modal de confirmação customizado
+          const confirmed = await confirmation.confirm({
+            title: 'Excluir Projeto',
+            message: `Tem certeza que deseja excluir permanentemente "${projectName}"?`,
+            details: [
+              'O projeto/obra será removido',
+              'Todas as tarefas planejadas',
+              'Diários de obra relacionados',
+              'Cronogramas e dependências',
+              'Histórico de progressão'
+            ],
+            type: 'danger',
+            confirmText: 'Sim, excluir projeto',
+            cancelText: 'Cancelar'
+          });
+
+          if (!confirmed) return;
+
+          const loadingToast = toast.loading('Excluindo projeto...');
+
           try {
             // 1. Chamar banco de dados para exclusão (cascade remove tasks)
             await dataSyncService.deleteProject(id, currentUser.tenantId);
@@ -987,10 +1015,14 @@ const App: React.FC = () => {
               setSelectedProject(null);
             }
             
-            showNotification('✅ Projeto excluído com sucesso!', 'success');
+            toast.dismiss(loadingToast);
+            toast.success(`✅ ${projectName} excluído com sucesso!`);
           } catch (error) {
             console.error('❌ Erro ao excluir projeto:', error);
-            showNotification('❌ Erro ao excluir projeto. Tente novamente.', 'error');
+            toast.dismiss(loadingToast);
+            toast.error('❌ Erro ao excluir projeto', {
+              description: error instanceof Error ? error.message : 'Tente novamente.'
+            });
           }
         }} 
       />
@@ -1069,13 +1101,39 @@ const App: React.FC = () => {
         }} 
         onAddDailyLog={(log) => setDailyLogs(prev => [...prev, { ...log, tenantId: currentUser.tenantId }])} 
         onRemoveDailyLog={async (id) => {
+          const log = dailyLogs.find(l => l.id === id);
+          const logDate = log?.data ? new Date(log.data).toLocaleDateString('pt-BR') : 'diário';
+          
+          const confirmed = await confirmation.confirm({
+            title: 'Excluir Diário de Obra',
+            message: `Tem certeza que deseja excluir o diário de ${logDate}?`,
+            details: [
+              'Registro completo do dia',
+              'Fotos e anexos',
+              'Observações e anotações',
+              'Clima e condições registradas'
+            ],
+            type: 'danger',
+            confirmText: 'Sim, excluir diário',
+            cancelText: 'Cancelar'
+          });
+
+          if (!confirmed) return;
+
+          const loadingToast = toast.loading('Excluindo diário...');
+
           try {
             await dataSyncService.deleteDailyLog(id, currentUser.tenantId);
             setDailyLogs(l => l.filter(x => x.id !== id));
-            showNotification('✅ Diário de obra excluído!', 'success');
+            
+            toast.dismiss(loadingToast);
+            toast.success('✅ Diário de obra excluído!');
           } catch (error) {
             console.error('❌ Erro ao excluir diário:', error);
-            showNotification('❌ Erro ao excluir diário.', 'error');
+            toast.dismiss(loadingToast);
+            toast.error('❌ Erro ao excluir diário', {
+              description: 'Tente novamente.'
+            });
           }
         }} 
         dailyLogs={tenantLogs} 
@@ -1095,6 +1153,27 @@ const App: React.FC = () => {
           allUsers={tenantUsers} 
           onAddResource={r => setResources(prev => [...prev.filter(x => x.id !== r.id), { ...r, tenantId: currentUser.tenantId }])} 
           onRemoveResource={async (id) => {
+            const resource = resources.find(r => r.id === id);
+            const resourceName = resource?.nome || 'recurso';
+            
+            const confirmed = await confirmation.confirm({
+              title: 'Excluir Recurso',
+              message: `Tem certeza que deseja excluir "${resourceName}"?`,
+              details: [
+                'O recurso será removido permanentemente',
+                'Alocações em tarefas serão removidas',
+                'Histórico de utilização será perdido',
+                'Relatórios e métricas serão impactados'
+              ],
+              type: 'danger',
+              confirmText: 'Sim, excluir recurso',
+              cancelText: 'Cancelar'
+            });
+
+            if (!confirmed) return;
+
+            const loadingToast = toast.loading('Excluindo recurso...');
+
             try {
               // 1. Chamar banco de dados para exclusão
               await dataSyncService.deleteResource(id, currentUser.tenantId);
@@ -1165,10 +1244,14 @@ const App: React.FC = () => {
             const updatedTasksList = tasks.filter(t => t.tenantId === currentUser.tenantId);
             await syncTasksWithSupabase(updatedTasksList);
             
-            showNotification('✅ Recurso excluído com sucesso!', 'success');
+            toast.dismiss(loadingToast);
+            toast.success(`✅ ${resourceName} excluído com sucesso!`);
           } catch (error) {
             console.error('❌ Erro ao excluir recurso:', error);
-            showNotification('❌ Erro ao excluir recurso.', 'error');
+            toast.dismiss(loadingToast);
+            toast.error('❌ Erro ao excluir recurso', {
+              description: error instanceof Error ? error.message : 'Tente novamente.'
+            });
           }
         }} 
         />
@@ -1281,6 +1364,20 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal de Confirmação Customizado */}
+      <ConfirmationDialog
+        isOpen={confirmation.state.isOpen}
+        onClose={confirmation.handleClose}
+        onConfirm={confirmation.handleConfirm}
+        title={confirmation.state.title}
+        message={confirmation.state.message}
+        details={confirmation.state.details}
+        type={confirmation.state.type}
+        confirmText={confirmation.state.confirmText}
+        cancelText={confirmation.state.cancelText}
+        isLoading={confirmation.state.isLoading}
+      />
     </>
   );
 };

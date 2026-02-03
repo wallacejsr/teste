@@ -60,6 +60,8 @@ import { ProtectedElement } from '../hooks/usePermission';
 import { Resource as PermissionResource, Action } from '../types/permissions';
 import { dataSyncService } from '../services/dataService';
 import { toast } from 'sonner';
+import ConfirmationDialog from '../components/ConfirmationDialog';
+import { useConfirmation } from '../hooks/useConfirmation';
 
 interface MasterAdminViewProps {
   activeTab: string;
@@ -102,6 +104,9 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
   const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Hook de confirmação customizado
+  const confirmation = useConfirmation();
 
   useEffect(() => {
     const loadUsersIfNeeded = async () => {
@@ -394,9 +399,31 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
   }, [allTenants, searchTerm, filterStatus]);
 
   const handleDeleteTenant = async (id: string) => {
-    if (!window.confirm(`⚠️ ATENÇÃO: Excluir organização irreversivelmente?\n\nEsta ação removerá:\n- Empresa\n- Todos os usuários\n- Todos os projetos\n- Todas as tarefas\n- Todos os diários de obra\n\nDeseja continuar?`)) {
-      return;
-    }
+    const tenant = allTenants.find(t => t.id === id);
+    const tenantName = tenant?.nome || 'organização';
+    
+    // Abrir modal de confirmação customizado
+    const confirmed = await confirmation.confirm({
+      title: 'Excluir Organização',
+      message: `Tem certeza que deseja excluir permanentemente "${tenantName}"?`,
+      details: [
+        'Empresa e todas as suas configurações',
+        'Todos os usuários vinculados',
+        'Todos os projetos e obras',
+        'Todas as tarefas planejadas',
+        'Todos os diários de obra',
+        'Todos os recursos (mão de obra e maquinário)',
+        'Histórico completo de atividades'
+      ],
+      type: 'danger',
+      confirmText: 'Sim, excluir permanentemente',
+      cancelText: 'Cancelar'
+    });
+
+    if (!confirmed) return;
+
+    // Mostrar toast de loading
+    const loadingToast = toast.loading('Excluindo organização...');
 
     try {
       // Chamar banco de dados para exclusão com cascade
@@ -406,10 +433,19 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
       onUpdateTenants(allTenants.filter(t => t.id !== id));
       onUpdateUsers(allUsers.filter(u => u.tenantId !== id));
       
-      alert('✅ Organização excluída com sucesso!');
+      // Remover loading toast e mostrar sucesso
+      toast.dismiss(loadingToast);
+      toast.success(`✅ ${tenantName} excluída com sucesso!`, {
+        description: 'Todos os dados relacionados foram removidos permanentemente.'
+      });
     } catch (error) {
       console.error('❌ Erro ao excluir tenant:', error);
-      alert(`❌ ERRO: Não foi possível excluir a organização.\n${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      
+      // Remover loading toast e mostrar erro
+      toast.dismiss(loadingToast);
+      toast.error('❌ Erro ao excluir organização', {
+        description: error instanceof Error ? error.message : 'Erro desconhecido. Tente novamente.'
+      });
     }
   };
 
@@ -1272,6 +1308,20 @@ const MasterAdminView: React.FC<MasterAdminViewProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Confirmação Customizado */}
+      <ConfirmationDialog
+        isOpen={confirmation.state.isOpen}
+        onClose={confirmation.handleClose}
+        onConfirm={confirmation.handleConfirm}
+        title={confirmation.state.title}
+        message={confirmation.state.message}
+        details={confirmation.state.details}
+        type={confirmation.state.type}
+        confirmText={confirmation.state.confirmText}
+        cancelText={confirmation.state.cancelText}
+        isLoading={confirmation.state.isLoading}
+      />
     </div>
   );
 };
