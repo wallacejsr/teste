@@ -5,7 +5,7 @@ import { GlobalConfig } from '../types';
 
 interface ModernLoadingProps {
   globalConfig?: GlobalConfig;
-  showError?: boolean; // 🚨 Mostrar erro se demorar muito
+  showError?: boolean; // Deprecated: não usado mais
 }
 
 export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig, showError = false }) => {
@@ -15,12 +15,12 @@ export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig, show
   const displayName = globalConfig?.softwareName && globalConfig.softwareName.trim() !== '' 
     ? globalConfig.softwareName 
     : 'Carregando';  
-  const [showErrorMessage, setShowErrorMessage] = React.useState(false);
+  const [showLoadingMessage, setShowLoadingMessage] = React.useState(false);
   
-  // ⏱️ Mostrar erro se demorar mais de 10 segundos
+  // ⏱️ Mostrar mensagem de aguarde após 10 segundos (carregamento lento)
   React.useEffect(() => {
     const timer = setTimeout(() => {
-      setShowErrorMessage(true);
+      setShowLoadingMessage(true);
     }, 10000); // 10 segundos
     
     return () => clearTimeout(timer);
@@ -112,18 +112,18 @@ export const ModernLoading: React.FC<ModernLoadingProps> = ({ globalConfig, show
             Preparando seu ambiente...
           </motion.p>
           
-          {/* 🚨 Mensagem de erro após 10 segundos */}
-          {showErrorMessage && (
+          {/* � Mensagem de aguarde após 10 segundos */}
+          {showLoadingMessage && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg max-w-md"
+              className="mt-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg max-w-md"
             >
-              <p className="text-red-400 text-xs font-medium text-center mb-2">
-                ⚠️ Erro ao carregar configurações do banco
+              <p className="text-blue-400 text-sm font-medium text-center mb-2">
+                ⏳ Aguarde um momento
               </p>
               <p className="text-slate-400 text-xs text-center">
-                Verifique o console (F12) para mais detalhes
+                Estamos carregando todas as configurações do sistema. Isso pode levar alguns instantes...
               </p>
             </motion.div>
           )}
