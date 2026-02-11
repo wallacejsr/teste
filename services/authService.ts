@@ -10,6 +10,7 @@
 import { SupabaseClient, Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { User, Role } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { logger } from './logger';
 
 // ================================================
 // INTERFACES
@@ -65,7 +66,7 @@ class AuthService {
       this.supabase = getSupabaseClient(supabaseUrl, supabaseKey);
       return true;
     } catch (error) {
-      console.error('❌ [AuthService] Failed to initialize:', error);
+      logger.error('❌ [AuthService] Failed to initialize:', error);
       return false;
     }
   }
@@ -98,7 +99,7 @@ class AuthService {
     }
 
     try {
-      console.log('[AuthService] Iniciando signup para:', data.email);
+      logger.log('[AuthService] Iniciando signup para:', data.email);
 
       // Criar usuário no Supabase Auth
       // O trigger on_auth_user_created cuidará da criação do registro em public.users
@@ -115,7 +116,7 @@ class AuthService {
       });
 
       if (authError) {
-        console.error('[AuthService] Signup auth error:', authError);
+        logger.error('[AuthService] Signup auth error:', authError);
         return { success: false, error: authError.message };
       }
 
@@ -123,7 +124,7 @@ class AuthService {
         return { success: false, error: 'Falha ao criar usuário' };
       }
 
-      console.log('✅ [AuthService] User created successfully:', authData.user.id);
+      logger.log('✅ [AuthService] User created successfully:', authData.user.id);
 
       // Converter para User type
       const user = this.convertToUser(authData.user, data.tenantId, data.role || Role.LEITURA);
@@ -134,7 +135,7 @@ class AuthService {
         session: authData.session || undefined,
       };
     } catch (error: any) {
-      console.error('[AuthService] Signup exception:', error);
+      logger.error('[AuthService] Signup exception:', error);
       return { success: false, error: error.message || 'Erro desconhecido' };
     }
   }
@@ -240,11 +241,11 @@ class AuthService {
       // 🔒 RATE LIMITING: Verificar antes de tentar autenticar
       const rateLimitCheck = this.checkRateLimit(data.email);
       if (!rateLimitCheck.allowed) {
-        console.warn('[AuthService] Login blocked by rate limit:', data.email);
+        logger.warn('[AuthService] Login blocked by rate limit:', data.email);
         return { success: false, error: rateLimitCheck.error };
       }
 
-      console.log('[AuthService] Tentando login para:', data.email);
+      logger.log('[AuthService] Tentando login para:', data.email);
 
       // 1. Autenticar via Supabase
       const { data: authData, error: authError } = await this.supabase.auth.signInWithPassword({
@@ -253,7 +254,11 @@ class AuthService {
       });
 
       if (authError) {
-        console.error('[AuthService] Login error:', authError);
+        logger.error('[AuthService] Login error:', authError);
+        
+        // 🔒 RATE LIMITING: Registrar tentativa falhada (CRÍTICO!)
+        this.recordLoginAttempt(data.email, false);
+        
         return { success: false, error: 'Email ou senha incorretos' };
       }
 
@@ -261,7 +266,7 @@ class AuthService {
         return { success: false, error: 'Falha na autenticação' };
       }
 
-      console.log('[AuthService] Auth successful:', authData.user.id);
+      logger.log('[AuthService] Auth successful:', authData.user.id);
       this.currentSession = authData.session;
 
       // 2. Buscar dados do usuário no banco
@@ -272,7 +277,7 @@ class AuthService {
         .single();
 
       if (dbError || !userData) {
-        console.error('[AuthService] Database fetch error:', dbError);
+        logger.error('[AuthService] Database fetch error:', dbError);
         await this.logout(); // Limpar sessão inválida
         
         // 🔒 RATE LIMITING: Registrar tentativa falhada (usuário não encontrado)
@@ -283,7 +288,7 @@ class AuthService {
 
       // 3. Verificar se usuário está ativo
       if (!userData.ativo) {
-        console.warn('[AuthService] User is inactive:', userData.id);
+        logger.warn('[AuthService] User is inactive:', userData.id);
         await this.logout();
         
         // 🔒 RATE LIMITING: Registrar tentativa falhada (usuário inativo)
@@ -292,7 +297,7 @@ class AuthService {
         return { success: false, error: 'Usuário inativo' };
       }
 
-      console.log('✅ [AuthService] Login successful');
+      logger.log('✅ [AuthService] Login successful');
       
       // 🔒 RATE LIMITING: Registrar tentativa bem-sucedida (limpa contador)
       this.recordLoginAttempt(data.email, true);
@@ -314,7 +319,11 @@ class AuthService {
         session: authData.session,
       };
     } catch (error: any) {
-      console.error('[AuthService] Login exception:', error);
+      logger.error('[AuthService] Login exception:', error);
+      
+      // 🔒 RATE LIMITING: Registrar tentativa falhada (exceção)
+      this.recordLoginAttempt(data.email, false);
+      
       return { success: false, error: error.message || 'Erro desconhecido' };
     }
   }
@@ -328,17 +337,17 @@ class AuthService {
    */
   async logout(): Promise<void> {
     if (!this.supabase) {
-      console.warn('[AuthService] Logout called but service not initialized');
+      logger.warn('[AuthService] Logout called but service not initialized');
       return;
     }
 
     try {
-      console.log('[AuthService] Logging out');
+      logger.log('[AuthService] Logging out');
       await this.supabase.auth.signOut();
       this.currentSession = null;
-      console.log('✅ [AuthService] Logout successful');
+      logger.log('✅ [AuthService] Logout successful');
     } catch (error) {
-      console.error('[AuthService] Logout error:', error);
+      logger.error('[AuthService] Logout error:', error);
     }
   }
 
@@ -358,14 +367,14 @@ class AuthService {
       const { data: { session }, error } = await this.supabase.auth.getSession();
       
       if (error) {
-        console.error('[AuthService] Get session error:', error);
+        logger.error('[AuthService] Get session error:', error);
         return null;
       }
 
       this.currentSession = session;
       return session;
     } catch (error) {
-      console.error('[AuthService] Get session exception:', error);
+      logger.error('[AuthService] Get session exception:', error);
       return null;
     }
   }
@@ -382,7 +391,7 @@ class AuthService {
       const { data: { user: authUser }, error } = await this.supabase.auth.getUser();
 
       if (error || !authUser) {
-        console.error('[AuthService] Get user error:', error);
+        logger.error('[AuthService] Get user error:', error);
         return null;
       }
 
@@ -394,7 +403,7 @@ class AuthService {
         .single();
 
       if (dbError || !userData) {
-        console.error('[AuthService] Database fetch error:', dbError);
+        logger.error('[AuthService] Database fetch error:', dbError);
         return null;
       }
 
@@ -409,7 +418,7 @@ class AuthService {
         lastPasswordChange: userData.lastPasswordChange,
       };
     } catch (error) {
-      console.error('[AuthService] Get current user exception:', error);
+      logger.error('[AuthService] Get current user exception:', error);
       return null;
     }
   }
@@ -426,14 +435,14 @@ class AuthService {
       const { data: { session }, error } = await this.supabase.auth.refreshSession();
 
       if (error) {
-        console.error('[AuthService] Refresh session error:', error);
+        logger.error('[AuthService] Refresh session error:', error);
         return null;
       }
 
       this.currentSession = session;
       return session;
     } catch (error) {
-      console.error('[AuthService] Refresh session exception:', error);
+      logger.error('[AuthService] Refresh session exception:', error);
       return null;
     }
   }
@@ -451,21 +460,21 @@ class AuthService {
     }
 
     try {
-      console.log('[AuthService] Requesting password reset for:', data.email);
+      logger.log('[AuthService] Requesting password reset for:', data.email);
 
       const { error } = await this.supabase.auth.resetPasswordForEmail(data.email, {
         redirectTo: `${window.location.origin}/reset-password`,
       });
 
       if (error) {
-        console.error('[AuthService] Password reset error:', error);
+        logger.error('[AuthService] Password reset error:', error);
         return { success: false, error: error.message };
       }
 
-      console.log('✅ [AuthService] Password reset email sent');
+      logger.log('✅ [AuthService] Password reset email sent');
       return { success: true };
     } catch (error: any) {
-      console.error('[AuthService] Password reset exception:', error);
+      logger.error('[AuthService] Password reset exception:', error);
       return { success: false, error: error.message || 'Erro desconhecido' };
     }
   }
@@ -480,7 +489,7 @@ class AuthService {
     }
 
     try {
-      console.log('🔍 [AuthService] Iniciando updatePassword');
+      logger.log('🔍 [AuthService] Iniciando updatePassword');
 
       // Atualizar senha no Supabase Auth
       const { data, error } = await this.supabase.auth.updateUser({
@@ -488,7 +497,7 @@ class AuthService {
       });
 
       // DEBUG PROFUNDO: Log completo do resultado
-      console.log('🔍 [AuthService] updateUser result:', {
+      logger.log('🔍 [AuthService] updateUser result:', {
         hasError: !!error,
         error: error ? { message: error.message, status: error.status, name: error.name } : null,
         hasData: !!data,
@@ -500,12 +509,12 @@ class AuthService {
       });
 
       if (error) {
-        console.error('❌ [AuthService] Update password error:', error);
+        logger.error('❌ [AuthService] Update password error:', error);
         return { success: false, error: error.message };
       }
 
       if (!data || !data.user) {
-        console.warn('⚠️ [AuthService] Update returned no user data (may indicate stale session)');
+        logger.warn('⚠️ [AuthService] Update returned no user data (may indicate stale session)');
         return { success: false, error: 'Sessão expirada. Faça login novamente.' };
       }
 
@@ -517,17 +526,17 @@ class AuthService {
         .eq('id', data.user.id);
 
       if (updateError) {
-        console.warn('⚠️ [AuthService] Failed to update last_password_change:', updateError);
+        logger.warn('⚠️ [AuthService] Failed to update last_password_change:', updateError);
         // Não falhar a operação se não conseguir atualizar o timestamp
       } else {
-        console.log('✅ [AuthService] last_password_change updated for user:', data.user.email);
+        logger.log('✅ [AuthService] last_password_change updated for user:', data.user.email);
       }
 
       // Sucesso depende apenas do Supabase Auth
-      console.log('✅ [AuthService] Password updated successfully for user:', data.user.email);
+      logger.log('✅ [AuthService] Password updated successfully for user:', data.user.email);
       return { success: true };
     } catch (error: any) {
-      console.error('[AuthService] Update password exception:', error);
+      logger.error('[AuthService] Update password exception:', error);
       return { success: false, error: error.message || 'Erro desconhecido' };
     }
   }
@@ -541,7 +550,7 @@ class AuthService {
    */
   onAuthStateChange(callback: (event: string, session: Session | null) => void): () => void {
     if (!this.supabase) {
-      console.warn('[AuthService] onAuthStateChange called but service not initialized');
+      logger.warn('[AuthService] onAuthStateChange called but service not initialized');
       return () => {};
     }
 
@@ -618,7 +627,7 @@ class AuthService {
       const payload = JSON.parse(atob(session.access_token.split('.')[1]));
       return payload.tenant_id || payload.user_metadata?.tenant_id || null;
     } catch (error) {
-      console.error('[AuthService] Error parsing JWT:', error);
+      logger.error('[AuthService] Error parsing JWT:', error);
       return null;
     }
   }
@@ -651,7 +660,7 @@ const result = await authService.signup({
 });
 
 if (result.success) {
-  console.log('Usuário criado:', result.user);
+  logger.log('Usuário criado:', result.user);
 }
 
 // Login
@@ -661,7 +670,7 @@ const loginResult = await authService.login({
 });
 
 if (loginResult.success) {
-  console.log('Login bem-sucedido:', loginResult.user);
+  logger.log('Login bem-sucedido:', loginResult.user);
 }
 
 // Logout
@@ -673,9 +682,9 @@ await authService.requestPasswordReset({ email: 'user@example.com' });
 // Escutar mudanças de auth
 authService.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_IN') {
-    console.log('Usuário fez login');
+    logger.log('Usuário fez login');
   } else if (event === 'SIGNED_OUT') {
-    console.log('Usuário fez logout');
+    logger.log('Usuário fez logout');
   }
 });
 */
