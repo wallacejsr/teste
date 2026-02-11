@@ -46,6 +46,12 @@ export interface PasswordResetData {
 class AuthService {
   private supabase: SupabaseClient | null = null;
   private currentSession: Session | null = null;
+  
+  // 🔒 RATE LIMITING: Proteção contra brute force
+  private loginAttempts = new Map<string, { count: number; lastAttempt: number; blockedUntil?: number }>();
+  private readonly MAX_ATTEMPTS = 5;
+  private readonly BLOCK_DURATION = 15 * 60 * 1000; // 15 minutos
+  private readonly ATTEMPT_WINDOW = 15 * 60 * 1000; // 15 minutos
 
   /**
    * Inicializar o serviço de autenticação
@@ -138,6 +144,91 @@ class AuthService {
   // ================================================
 
   /**
+   * Verificar rate limit antes de permitir tentativa de login
+   */
+  private checkRateLimit(email: string): { allowed: boolean; error?: string; remainingTime?: number } {
+    const key = email.toLowerCase().trim();
+    const now = Date.now();
+    const attempt = this.loginAttempts.get(key);
+
+    // Se não há tentativas anteriores, permitir
+    if (!attempt) {
+      return { allowed: true };
+    }
+
+    // Se está bloqueado, verificar se o tempo de bloqueio expirou
+    if (attempt.blockedUntil && now < attempt.blockedUntil) {
+      const remainingMinutes = Math.ceil((attempt.blockedUntil - now) / 60000);
+      return {
+        allowed: false,
+        error: `Muitas tentativas de login. Tente novamente em ${remainingMinutes} minuto${remainingMinutes > 1 ? 's' : ''}.`,
+        remainingTime: attempt.blockedUntil - now
+      };
+    }
+
+    // Se o bloqueio expirou, resetar contador
+    if (attempt.blockedUntil && now >= attempt.blockedUntil) {
+      this.loginAttempts.delete(key);
+      return { allowed: true };
+    }
+
+    // Se a última tentativa foi há mais de 15 minutos, resetar
+    if (now - attempt.lastAttempt > this.ATTEMPT_WINDOW) {
+      this.loginAttempts.delete(key);
+      return { allowed: true };
+    }
+
+    // Se atingiu o limite de tentativas, bloquear
+    if (attempt.count >= this.MAX_ATTEMPTS) {
+      const blockedUntil = now + this.BLOCK_DURATION;
+      this.loginAttempts.set(key, {
+        ...attempt,
+        blockedUntil
+      });
+      
+      const remainingMinutes = Math.ceil(this.BLOCK_DURATION / 60000);
+      return {
+        allowed: false,
+        error: `Muitas tentativas de login. Conta bloqueada por ${remainingMinutes} minutos.`,
+        remainingTime: this.BLOCK_DURATION
+      };
+    }
+
+    // Permitir tentativa
+    return { allowed: true };
+  }
+
+  /**
+   * Registrar tentativa de login (sucesso ou falha)
+   */
+  private recordLoginAttempt(email: string, success: boolean) {
+    const key = email.toLowerCase().trim();
+    const now = Date.now();
+
+    if (success) {
+      // Login bem-sucedido: limpar tentativas
+      this.loginAttempts.delete(key);
+      return;
+    }
+
+    // Login falhou: incrementar contador
+    const attempt = this.loginAttempts.get(key);
+    
+    if (!attempt) {
+      this.loginAttempts.set(key, {
+        count: 1,
+        lastAttempt: now
+      });
+    } else {
+      this.loginAttempts.set(key, {
+        count: attempt.count + 1,
+        lastAttempt: now,
+        blockedUntil: attempt.blockedUntil
+      });
+    }
+  }
+
+  /**
    * Fazer login com email e senha
    */
   async login(data: LoginData): Promise<AuthResult> {
@@ -146,6 +237,13 @@ class AuthService {
     }
 
     try {
+      // 🔒 RATE LIMITING: Verificar antes de tentar autenticar
+      const rateLimitCheck = this.checkRateLimit(data.email);
+      if (!rateLimitCheck.allowed) {
+        console.warn('[AuthService] Login blocked by rate limit:', data.email);
+        return { success: false, error: rateLimitCheck.error };
+      }
+
       console.log('[AuthService] Tentando login para:', data.email);
 
       // 1. Autenticar via Supabase
@@ -176,6 +274,10 @@ class AuthService {
       if (dbError || !userData) {
         console.error('[AuthService] Database fetch error:', dbError);
         await this.logout(); // Limpar sessão inválida
+        
+        // 🔒 RATE LIMITING: Registrar tentativa falhada (usuário não encontrado)
+        this.recordLoginAttempt(data.email, false);
+        
         return { success: false, error: 'Usuário não encontrado no banco' };
       }
 
@@ -183,10 +285,17 @@ class AuthService {
       if (!userData.ativo) {
         console.warn('[AuthService] User is inactive:', userData.id);
         await this.logout();
+        
+        // 🔒 RATE LIMITING: Registrar tentativa falhada (usuário inativo)
+        this.recordLoginAttempt(data.email, false);
+        
         return { success: false, error: 'Usuário inativo' };
       }
 
       console.log('✅ [AuthService] Login successful');
+      
+      // 🔒 RATE LIMITING: Registrar tentativa bem-sucedida (limpa contador)
+      this.recordLoginAttempt(data.email, true);
 
       // 4. Converter para User type
       const user: User = {

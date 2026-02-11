@@ -249,10 +249,7 @@ const App: React.FC = () => {
           setCurrentUser(user);
           setIsLoggedIn(true);
           
-          // FAIL-SAFE: Salvar role no localStorage (apenas cache, sempre validar com Supabase)
-          localStorage.setItem('ep_user_role_cache', user.role);
-          localStorage.setItem('ep_user_id_cache', user.id);
-          
+          // 🔒 SEGURANÇA: Cache de role REMOVIDO - sempre validar via JWT/authService
           // Limpar cache antigo de permissões (força revalidação)
           permissionManager.clearCache();
           
@@ -274,18 +271,16 @@ const App: React.FC = () => {
           }
         }
       } else {
-        // Sem sessão: tentar recuperar role do cache temporariamente (será validado logo)
-        const cachedRole = localStorage.getItem('ep_user_role_cache') as Role | null;
-        const cachedUserId = localStorage.getItem('ep_user_id_cache');
-        
-        if (cachedRole && cachedUserId) {
-          // Usuário momentâneo até validação do Supabase
-          setCurrentUser(prev => ({ 
-            ...prev, 
-            id: cachedUserId,
-            role: cachedRole 
-          }));
-        }
+        // 🔒 SEGURANÇA: Cache de role REMOVIDO - sempre validar via JWT/authService
+        // Sem sessão: manter usuário anônimo até validação completa
+        setCurrentUser({
+          id: 'anon',
+          nome: 'Visitante',
+          email: '',
+          tenantId: '',
+          role: Role.LEITURA,
+          ativo: false
+        });
       }
 
       // ✅ authInitialized=true APENAS APÓS branding + dados carregados
@@ -365,10 +360,7 @@ const App: React.FC = () => {
           setIsLoggedIn(true);
           showNotification('Login realizado com sucesso!', 'success');
           
-          // FAIL-SAFE: Persistir role no localStorage (cache validado)
-          localStorage.setItem('ep_user_role_cache', user.role);
-          localStorage.setItem('ep_user_id_cache', user.id);
-          
+          // 🔒 SEGURANÇA: Cache de role REMOVIDO - sempre validar via JWT/authService
           // PILAR 4: Limpar cache antigo e reinicializar Permission Manager
           permissionManager.clearCache();
           const supabaseClient = dataSyncService.getSupabaseClient();
@@ -401,10 +393,8 @@ const App: React.FC = () => {
         setActiveTab('dashboard');
         showNotification('Logout realizado', 'success');
         
-        // PILAR 4: Limpar Permission Manager e cache de role
+        // 🔒 SEGURANÇA: Cache de role REMOVIDO - Permission Manager usa apenas JWT
         permissionManager.clearCache();
-        localStorage.removeItem('ep_user_role_cache');
-        localStorage.removeItem('ep_user_id_cache');
       }
     });
 
