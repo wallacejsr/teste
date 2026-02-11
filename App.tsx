@@ -1266,18 +1266,29 @@ const App: React.FC = () => {
   // 🛑 ESCUDO TOTAL: ModernLoading até branding + imagem estarem 100% prontos
   // Garante que usuário NUNCA vê valores vazios ou carregamento fragmentado
   if (!authInitialized || !loginReady || isLoadingData || (isLoggedIn && !isRoleLoaded)) {
-    return <ModernLoading globalConfig={globalConfig} />;
+    return (
+      <>
+        <ModernLoading globalConfig={globalConfig} />
+        <Toaster position="bottom-right" richColors closeButton />
+      </>
+    );
   }
 
   if (!isLoggedIn) {
     // ✨ REVELAÇÃO: Agora sim, tudo pronto para revelar LoginView com fade-in
-    return <LoginView onLogin={handleLogin} globalConfig={globalConfig} imagePreloaded={true} />;
+    return (
+      <>
+        <LoginView onLogin={handleLogin} globalConfig={globalConfig} imagePreloaded={true} />
+        <Toaster position="bottom-right" richColors closeButton />
+      </>
+    );
   }
 
   // Trava de Licença Expirada (Restaurada do Backup)
   if (activeTenant && activeTenant.status === LicenseStatus.EXPIRADA && currentUser.role !== Role.SUPERADMIN) {
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-[#0f172a] text-white p-10 relative overflow-hidden">
+      <>
+        <div className="h-screen w-full flex items-center justify-center bg-[#0f172a] text-white p-10 relative overflow-hidden">
         <div className="absolute inset-0 bg-blue-600/10 blur-[120px] rounded-full pointer-events-none"></div>
         <div className="max-w-md w-full text-center space-y-8 animate-in fade-in zoom-in-95 duration-700">
           <div className="w-24 h-24 bg-red-500 rounded-[32px] flex items-center justify-center mx-auto shadow-2xl shadow-red-500/20">
@@ -1301,6 +1312,8 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
+      <Toaster position="bottom-right" richColors closeButton />
+      </>
     );
   }
 
@@ -1321,7 +1334,6 @@ const App: React.FC = () => {
         {renderContent()}
       </Layout>
       <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} activeTenant={tenantForUI} />
-      <Toaster position="bottom-right" richColors closeButton />
 
       {/* Modal de Confirmação Customizado */}
       <ConfirmationDialog
@@ -1336,6 +1348,7 @@ const App: React.FC = () => {
         cancelText={confirmation.state.cancelText}
         isLoading={confirmation.state.isLoading}
       />
+      <Toaster position="bottom-right" richColors closeButton />
     </>
   );
 };

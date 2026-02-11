@@ -294,6 +294,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
+                  autoComplete="email"
                   required
                   className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
                 />
@@ -316,6 +317,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
+                    autoComplete="current-password"
                     required
                     className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
                   />
@@ -342,6 +344,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
+                    autoComplete="new-password"
                     required
                     className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
                   />

@@ -242,12 +242,14 @@ class AuthService {
       const rateLimitCheck = this.checkRateLimit(data.email);
       if (!rateLimitCheck.allowed) {
         logger.debug('[AuthService] Login blocked by rate limit:', data.email);
+        // ⚠️ BLOQUEIO TOTAL: Return ANTES de qualquer chamada ao Supabase
+        // Impede erro 400 no console e economiza requisições
         return { success: false, error: rateLimitCheck.error };
       }
 
       logger.log('[AuthService] Tentando login para:', data.email);
 
-      // 1. Autenticar via Supabase
+      // 1. Autenticar via Supabase (apenas se rate limit permitir)
       const { data: authData, error: authError } = await this.supabase.auth.signInWithPassword({
         email: data.email,
         password: data.password,
