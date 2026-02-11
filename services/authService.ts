@@ -220,12 +220,15 @@ class AuthService {
         count: 1,
         lastAttempt: now
       });
+      logger.debug(`[RateLimit] Primeira tentativa falhada para ${email} (1/${this.MAX_ATTEMPTS})`);
     } else {
+      const newCount = attempt.count + 1;
       this.loginAttempts.set(key, {
-        count: attempt.count + 1,
+        count: newCount,
         lastAttempt: now,
         blockedUntil: attempt.blockedUntil
       });
+      logger.debug(`[RateLimit] Tentativa falhada ${newCount}/${this.MAX_ATTEMPTS} para ${email}`);
     }
   }
 
@@ -241,10 +244,9 @@ class AuthService {
       // 🔒 RATE LIMITING: Verificar antes de tentar autenticar
       const rateLimitCheck = this.checkRateLimit(data.email);
       if (!rateLimitCheck.allowed) {
-        logger.debug('[AuthService] Login blocked by rate limit:', data.email);
-        // ⚠️ BLOQUEIO TOTAL: Return ANTES de qualquer chamada ao Supabase
-        // Impede erro 400 no console e economiza requisições
-        return { success: false, error: rateLimitCheck.error };
+        // ⚠️ BLOQUEIO TOTAL: Return IMEDIATO - zero chamadas ao Supabase
+        logger.debug(`[AuthService] 🚫 Rate limit ATIVO para ${data.email}. Bloqueio restante: ${Math.ceil((rateLimitCheck.remainingTime || 0) / 60000)} minutos`);
+        return { success: false, error: rateLimitCheck.error || 'Muitas tentativas. Aguarde.' };
       }
 
       logger.log('[AuthService] Tentando login para:', data.email);
@@ -256,11 +258,10 @@ class AuthService {
       });
 
       if (authError) {
-        logger.warn('[AuthService] Login failed - Invalid credentials:', data.email);
-        
         // 🔒 RATE LIMITING: Registrar tentativa falhada (CRÍTICO!)
         this.recordLoginAttempt(data.email, false);
         
+        // Silencioso: erro 400 do navegador já aparece no Network tab
         return { success: false, error: 'Email ou senha incorretos' };
       }
 
