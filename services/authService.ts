@@ -241,7 +241,7 @@ class AuthService {
       // 🔒 RATE LIMITING: Verificar antes de tentar autenticar
       const rateLimitCheck = this.checkRateLimit(data.email);
       if (!rateLimitCheck.allowed) {
-        logger.warn('[AuthService] Login blocked by rate limit:', data.email);
+        logger.debug('[AuthService] Login blocked by rate limit:', data.email);
         return { success: false, error: rateLimitCheck.error };
       }
 
@@ -254,7 +254,7 @@ class AuthService {
       });
 
       if (authError) {
-        logger.error('[AuthService] Login error:', authError);
+        logger.warn('[AuthService] Login failed - Invalid credentials:', data.email);
         
         // 🔒 RATE LIMITING: Registrar tentativa falhada (CRÍTICO!)
         this.recordLoginAttempt(data.email, false);

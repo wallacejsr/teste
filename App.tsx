@@ -18,7 +18,7 @@ import ModernLoading from './components/ModernLoading';
 import ConfirmationDialog from './components/ConfirmationDialog';
 import { useConfirmation } from './hooks/useConfirmation';
 import { User, Project, Task, Resource, DailyLog, Role, Tenant, LicenseStatus, GlobalConfig, PlanTemplate } from './types';
-import { AlertCircle, MessageSquare, Wifi, WifiOff, CheckCircle, Clock } from 'lucide-react';
+import { AlertCircle, MessageSquare, Wifi, WifiOff } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { dataSyncService } from './services/dataService';
 import { DataSyncService } from './services/dataService';
@@ -209,7 +209,7 @@ const App: React.FC = () => {
       
       // Registrar callback de erro de permissão
       dataSyncInstance.setPermissionErrorCallback((message) => {
-        showNotification(message, 'error');
+        toast.error(message);
       });
       
       if (!authInit || !dataInit) {
@@ -358,7 +358,7 @@ const App: React.FC = () => {
         if (user && user.ativo) {
           setCurrentUser(user);
           setIsLoggedIn(true);
-          showNotification('Login realizado com sucesso!', 'success');
+          toast.success('✅ Login realizado com sucesso!');
           
           // 🔒 SEGURANÇA: Cache de role REMOVIDO - sempre validar via JWT/authService
           // PILAR 4: Limpar cache antigo e reinicializar Permission Manager
@@ -391,7 +391,7 @@ const App: React.FC = () => {
         });
         setIsLoggedIn(false);
         setActiveTab('dashboard');
-        showNotification('Logout realizado', 'success');
+        toast.success('Logout realizado');
         
         // 🔒 SEGURANÇA: Cache de role REMOVIDO - Permission Manager usa apenas JWT
         permissionManager.clearCache();
@@ -566,10 +566,10 @@ const App: React.FC = () => {
       localStorage.setItem('ep_dailyLogs', JSON.stringify(data.dailyLogs));
       
       setSyncStatus('online');
-      showNotification('✅ Dados sincronizados com sucesso', 'success');
+      toast.success('✅ Dados sincronizados com sucesso');
     } catch (error) {
       setSyncStatus('offline');
-      showNotification('⚠️ Erro ao carregar dados. Usando backup local.', 'warning');
+      toast.warning('⚠️ Erro ao carregar dados. Usando backup local.');
       loadFromLocalStorage();
     } finally {
       setIsLoadingData(false);
@@ -611,10 +611,7 @@ const App: React.FC = () => {
       const result = await tenantGuardRef.current!.validateCurrentUser();
       
       if (!result.isValid && result.shouldLogout) {
-        showNotification(
-          `⚠️ Sessão encerrada: ${result.error}`,
-          'error'
-        );
+        toast.error(`⚠️ Sessão encerrada: ${result.error}`);
         
         // Forçar logout
         setIsLoggedIn(false);
@@ -636,10 +633,7 @@ const App: React.FC = () => {
     const monitor = setInterval(() => {
       tenantGuardRef.current!.monitorSession(() => {
         setIsLoggedIn(false);
-        showNotification(
-          '⚠️ Sessão encerrada por razões de segurança',
-          'error'
-        );
+        toast.error('⚠️ Sessão encerrada por razões de segurança');
       });
     }, 30000);
 
@@ -714,12 +708,6 @@ const App: React.FC = () => {
     localStorage.setItem('ep_plans_config', JSON.stringify(plansConfig));
   }, [projects, tasks, resources, dailyLogs, selectedProject, activeTab, tenants, allUsers, globalConfig, plansConfig]);
 
-  // Sistema de notificações
-  const showNotification = (message: string, type: 'success' | 'warning' | 'error') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
-
   // =====================================================
   // REAL-TIME LISTENERS (SUPABASE)
   // =====================================================
@@ -792,7 +780,7 @@ const App: React.FC = () => {
   // =====================================================
   const syncTasksWithSupabase = async (updatedTasks: Task[]) => {
     if (!dataSyncService.isAvailable()) {
-      showNotification('⚠️ Offline - Salvando localmente', 'warning');
+      toast.warning('⚠️ Offline - Salvando localmente');
       return;
     }
 
@@ -809,7 +797,7 @@ const App: React.FC = () => {
       setSyncStatus('online');
     } catch (error) {
       setSyncStatus('offline');
-      showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
+      toast.warning('⚠️ Dados salvos localmente. Sincronizando quando online...');
     }
   };
 
@@ -833,16 +821,13 @@ const App: React.FC = () => {
       setSyncStatus('online');
     } catch (error: any) {
       setSyncStatus('offline');
-      showNotification(
-        `⚠️ Erro ao sincronizar: ${error.message || 'Dados salvos localmente'}`,
-        'warning'
-      );
+      toast.warning(`⚠️ Erro ao sincronizar: ${error.message || 'Dados salvos localmente'}`);
     }
   };
 
   const syncResourcesWithSupabase = async (updatedResources: Resource[]) => {
     if (!dataSyncService.isAvailable()) {
-      showNotification('⚠️ Offline - Salvando localmente', 'warning');
+      toast.warning('⚠️ Offline - Salvando localmente');
       return;
     }
 
@@ -859,13 +844,13 @@ const App: React.FC = () => {
       setSyncStatus('online');
     } catch (error) {
       setSyncStatus('offline');
-      showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
+      toast.warning('⚠️ Dados salvos localmente. Sincronizando quando online...');
     }
   };
 
   const syncDailyLogsWithSupabase = async (updatedLogs: DailyLog[]) => {
     if (!dataSyncService.isAvailable()) {
-      showNotification('⚠️ Offline - Salvando localmente', 'warning');
+      toast.warning('⚠️ Offline - Salvando localmente');
       return;
     }
 
@@ -882,7 +867,7 @@ const App: React.FC = () => {
       setSyncStatus('online');
     } catch (error) {
       setSyncStatus('offline');
-      showNotification('⚠️ Dados salvos localmente. Sincronizando quando online...', 'warning');
+      toast.warning('⚠️ Dados salvos localmente. Sincronizando quando online...');
     }
   };
 
@@ -897,7 +882,7 @@ const App: React.FC = () => {
     const normalizedEmail = email.toLowerCase().trim();
     
     if (!password) {
-      showNotification('⚠️ Senha é obrigatória', 'error');
+      toast.error('⚠️ Senha é obrigatória');
       return;
     }
     
@@ -907,12 +892,12 @@ const App: React.FC = () => {
     const result = await authService.login({ email: normalizedEmail, password });
     
     if (!result.success) {
-      showNotification(result.error || 'Erro ao fazer login', 'error');
+      toast.error(result.error || 'Erro ao fazer login');
       return;
     }
     
     // Sucesso: onAuthStateChange já atualizou currentUser com dados do banco
-    showNotification('✅ Login realizado com sucesso!', 'success');
+    toast.success('✅ Login realizado com sucesso!');
   };
 
   const handleLogout = async () => {
@@ -1337,23 +1322,6 @@ const App: React.FC = () => {
       </Layout>
       <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} activeTenant={tenantForUI} />
       <Toaster position="bottom-right" richColors closeButton />
-      
-      {/* Sistema de Notificações */}
-      {notification && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5">
-          <div className={`
-            px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 min-w-[320px] max-w-md
-            ${notification.type === 'success' ? 'bg-green-500 text-white' : ''}
-            ${notification.type === 'warning' ? 'bg-yellow-500 text-slate-900' : ''}
-            ${notification.type === 'error' ? 'bg-red-500 text-white' : ''}
-          `}>
-            {notification.type === 'success' && <CheckCircle size={20} />}
-            {notification.type === 'warning' && <Clock size={20} />}
-            {notification.type === 'error' && <AlertCircle size={20} />}
-            <span className="font-medium">{notification.message}</span>
-          </div>
-        </div>
-      )}
 
       {/* Modal de Confirmação Customizado */}
       <ConfirmationDialog
