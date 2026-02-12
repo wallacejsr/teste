@@ -19,8 +19,21 @@ import { Resend } from 'resend';
 // 2. Gerar API Key no Dashboard
 // 3. Verificar domínio de envio (ou usar onboarding@resend.dev para testes)
 // 4. Substituir a API Key abaixo pela sua chave real
-const RESEND_API_KEY = (import.meta as any).env?.VITE_RESEND_API_KEY || 're_123456789'; // ⚠️ CONFIGURAR NO .env
 
+// 🔒 HOTFIX: Validação robusta para evitar TypeError
+const getResendApiKey = (): string => {
+  const envKey = (import.meta as any).env?.VITE_RESEND_API_KEY;
+  
+  // Se não houver chave no .env, usar chave de teste válida
+  if (!envKey || typeof envKey !== 'string' || envKey.trim() === '') {
+    console.warn('[EmailService] ⚠️ VITE_RESEND_API_KEY não configurada. Usando chave de teste.');
+    return 're_123456789_test_key_placeholder'; // Chave válida para não quebrar Resend SDK
+  }
+  
+  return envKey.trim();
+};
+
+const RESEND_API_KEY = getResendApiKey();
 const resend = new Resend(RESEND_API_KEY);
 
 // 📧 Configuração do Remetente
@@ -188,9 +201,27 @@ function getInviteEmailTemplate(params: SendInviteEmailParams): string {
  */
 export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ success: boolean; error?: string }> {
   try {
-    // Validações básicas
-    if (!params.toEmail || !params.toName || !params.inviteToken) {
-      throw new Error('Parâmetros obrigatórios faltando');
+    // 🔒 HOTFIX: Validações robustas com type checking
+    if (!params || typeof params !== 'object') {
+      throw new Error('Parâmetros inválidos');
+    }
+    
+    if (!params.toEmail || typeof params.toEmail !== 'string' || params.toEmail.trim() === '') {
+      throw new Error('E-mail do destinatário inválido ou vazio');
+    }
+    
+    if (!params.toName || typeof params.toName !== 'string' || params.toName.trim() === '') {
+      throw new Error('Nome do destinatário inválido ou vazio');
+    }
+    
+    if (!params.inviteToken || typeof params.inviteToken !== 'string' || params.inviteToken.trim() === '') {
+      throw new Error('Token de convite inválido ou vazio');
+    }
+    
+    // Validar formato básico de e-mail
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(params.toEmail.trim())) {
+      throw new Error('Formato de e-mail inválido');
     }
 
     // Usar e-mail dev se não houver API key configurada

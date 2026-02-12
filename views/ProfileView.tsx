@@ -104,6 +104,33 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       const role = formData.get('role') as Role;
       const cargo = formData.get('cargo') as string;
       
+      // 🔒 HOTFIX: Validações de segurança antes de processar
+      if (!nome || typeof nome !== 'string' || nome.trim() === '') {
+        toast.error('❌ Por favor, preencha o nome do convidado.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      if (!email || typeof email !== 'string' || email.trim() === '') {
+        toast.error('❌ Por favor, preencha o e-mail do convidado.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      // Validar formato básico de e-mail
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        toast.error('❌ Formato de e-mail inválido.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      if (!role) {
+        toast.error('❌ Por favor, selecione o nível de acesso.');
+        setInviteLoading(false);
+        return;
+      }
+      
       // 🔑 Gerar token único de convite (UUID v4)
       const inviteToken = uuidv4();
       
