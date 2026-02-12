@@ -5,7 +5,8 @@ import {
   AreaChart, Area, ReferenceLine, Cell
 } from 'recharts';
 import { Project, Task, Resource, DailyLog } from '../types';
-import { calculateFinancialEVA, countWorkDays } from '../services/planningEngine';
+import { calculateFinancialEVA } from '../services/planningEngine';
+import { useMemoizedEVA, useProjectStats } from '../hooks/useMemoizedEVA';
 import { 
   Target, 
   DollarSign, 
@@ -29,6 +30,56 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, tasks, resources, daily
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // 🚀 OTIMIZAÇÃO: Memoizar EVA individualmente para cada projeto
+  // Evita recalcular todos os projetos quando apenas 1 muda
+  const projectPerformance = useMemo(() => {
+    return projects.map(project => {
+      const projectTasks = tasks.filter(t => t.obraId === project.id);
+      const evaData = calculateFinancialEVA(projectTasks, resources, project, dailyLogs, true);
+      
+      const lastPoint = evaData[evaData.length - 1];
+      const ev = lastPoint?.ev || 0;
+      const ac = lastPoint?.ac || 0;
+      const pv = lastPoint?.pv || 0;
+      
+      // Calcular BAC otimizado
+      const subtasks = projectTasks.filter(t => t.wbs.includes('.'));
+      const bac = subtasks.reduce((sum, t) => {
+        const dailyCost = t.alocacoes.reduce((s, aloc) => {
+          const res = resources.find(r => r.id === aloc.recursoId);
+          return s + (res ? res.custoHora * aloc.quantidade * 8 : 0);
+        }, 0);
+        
+        // Calcular dias úteis inline (mais rápido que countWorkDays)
+        const start = new Date(t.inicioPlanejado + 'T00:00:00');
+        const end = new Date(t.fimPlanejado + 'T00:00:00');
+        let workDays = 0;
+        const current = new Date(start);
+        
+        while (current <= end) {
+          const dayOfWeek = current.getDay();
+          if (dayOfWeek !== 0 && dayOfWeek !== 6) workDays++;
+          current.setDate(current.getDate() + 1);
+        }
+        
+        return sum + (dailyCost * Math.max(1, workDays));
+      }, 0);
+
+      return {
+        id: project.id,
+        nome: project.nome,
+        cpi: ac > 0 ? ev / ac : 1,
+        spi: pv > 0 ? ev / pv : 1,
+        ev,
+        pv,
+        ac,
+        bac,
+        evaData
+      };
+    });
+  }, [projects, tasks, resources, dailyLogs]);
+
+  // 🚀 OTIMIZAÇÃO: Calcular estatísticas consolidadas apenas quando projectPerformance muda
   const consolidatedStats = useMemo(() => {
     let globalPV = 0;
     let globalEV = 0;
@@ -36,40 +87,14 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, tasks, resources, daily
     let globalBAC = 0;
     let totalBudget = 0;
     
-    const projectPerformance = projects.map(p => {
-      const pTasks = tasks.filter(t => t.obraId === p.id);
-      const eva = calculateFinancialEVA(pTasks, resources, p, dailyLogs, true);
-      
-      const lastPoint = eva[eva.length - 1];
-      const ev = lastPoint?.ev || 0;
-      const ac = lastPoint?.ac || 0;
-      const pv = lastPoint?.pv || 0;
-      
-      const bac = pTasks.filter(t => t.wbs.includes('.')).reduce((sum, t) => {
-        const dailyCost = t.alocacoes.reduce((s, aloc) => {
-          const res = resources.find(r => r.id === aloc.recursoId);
-          return s + (res ? res.custoHora * aloc.quantidade * 8 : 0);
-        }, 0);
-        return sum + (dailyCost * countWorkDays(t.inicioPlanejado, t.fimPlanejado));
-      }, 0);
-
-      globalPV += pv;
-      globalEV += ev;
-      globalAC += ac;
-      globalBAC += bac;
-      totalBudget += p.orcamento;
-
-      return {
-        id: p.id,
-        nome: p.nome,
-        cpi: ac > 0 ? ev / ac : 1,
-        spi: pv > 0 ? ev / pv : 1,
-        ev,
-        pv,
-        ac,
-        bac,
-        evaData: eva
-      };
+    // 🚀 Usar projectPerformance já calculado ao invés de recalcular EVA
+    projectPerformance.forEach(p => {
+      globalPV += p.pv;
+      globalEV += p.ev;
+      globalAC += p.ac;
+      globalBAC += p.bac;
+      const project = projects.find(proj => proj.id === p.id);
+      if (project) totalBudget += project.orcamento;
     });
 
     const allDates = new Set<string>();
@@ -107,19 +132,35 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, tasks, resources, daily
       globalAC,
       globalPV
     };
-  }, [projects, tasks, resources, dailyLogs]);
+  }, [projectPerformance, projects]);
 
   const criticalTasks = useMemo(() => {
+    // 🚀 OTIMIZAÇÃO: Criar Map de recursos para lookup O(1)
+    const resourceMap = new Map(resources.map(r => [r.id, r]));
+    
     return tasks.filter(t => {
       const isDelayed = new Date(t.fimPlanejado + 'T00:00:00') < today;
       return t.wbs.includes('.') && isDelayed && t.qtdRealizada < t.qtdPlanejada;
     }).map(t => {
       const progress = t.qtdRealizada / t.qtdPlanejada;
       const dailyCost = t.alocacoes.reduce((s, aloc) => {
-        const res = resources.find(r => r.id === aloc.recursoId);
+        const res = resourceMap.get(aloc.recursoId);
         return s + (res ? res.custoHora * aloc.quantidade * 8 : 0);
       }, 0);
-      const bac = dailyCost * countWorkDays(t.inicioPlanejado, t.fimPlanejado);
+      
+      // Calcular dias úteis inline
+      const start = new Date(t.inicioPlanejado + 'T00:00:00');
+      const end = new Date(t.fimPlanejado + 'T00:00:00');
+      let workDays = 0;
+      const current = new Date(start);
+      
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) workDays++;
+        current.setDate(current.getDate() + 1);
+      }
+      
+      const bac = dailyCost * Math.max(1, workDays);
       const riskValue = bac * (1 - progress);
       return { ...t, riskValue };
     }).sort((a, b) => b.riskValue - a.riskValue);

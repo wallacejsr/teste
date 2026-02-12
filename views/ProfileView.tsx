@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { User, Tenant, Role, GlobalConfig, PlanTemplate } from '../types';
 import { authService } from '../services/authService'; // 🔐 Named export
 import { dataSyncService } from '../services/dataService';
+import { emailService } from '../services/emailService'; // 📧 Email service
+import { v4 as uuidv4 } from 'uuid'; // 🔑 UUID generator
 import { useImageUpload } from '../hooks/useImageUpload';
 import { 
   User as UserIcon, 
@@ -57,6 +59,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'perfil' | 'empresa' | 'equipe' | 'seguranca' | 'branding'>('perfil');
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false); // 📧 Loading do envio de e-mail
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -83,25 +86,74 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   // Se o plano global mudou (ex: de 5 para 50), o sistema prioriza o valor do modelo de plano
   const effectiveUserLimit = currentPlan ? currentPlan.limiteUsuarios : tenant.limiteUsuarios;
 
-  const handleInviteUser = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleInviteUser = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // Bloqueio corrigido usando o limite efetivo de 50
+    
+    // Bloqueio corrigido usando o limite efetivo
     if (allUsers.length >= effectiveUserLimit) {
-       toast.error('Capacidade da licença atingida. Solicite upgrade no Master Admin.');
+      toast.error('Capacidade da licença atingida. Solicite upgrade no Master Admin.');
       return;
     }
-    const formData = new FormData(e.currentTarget);
-    const newUser: User = {
-      id: `u-${Date.now()}`,
-      nome: formData.get('nome') as string,
-      email: formData.get('email') as string,
-      tenantId: tenant.id,
-      role: formData.get('role') as Role,
-      cargo: formData.get('cargo') as string,
-      ativo: true
-    };
-    onUpdateUsers([...allUsers, newUser]);
-    setShowInviteModal(false);
+    
+    setInviteLoading(true);
+    
+    try {
+      const formData = new FormData(e.currentTarget);
+      const nome = formData.get('nome') as string;
+      const email = formData.get('email') as string;
+      const role = formData.get('role') as Role;
+      const cargo = formData.get('cargo') as string;
+      
+      // 🔑 Gerar token único de convite (UUID v4)
+      const inviteToken = uuidv4();
+      
+      // ⏰ Token válido por 7 dias
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 7);
+      
+      // 👤 Criar novo usuário com token
+      const newUser: User = {
+        id: `u-${Date.now()}`,
+        nome,
+        email,
+        tenantId: tenant.id,
+        role,
+        cargo,
+        ativo: true,
+        inviteToken,
+        inviteTokenExpiry: expiryDate.toISOString(),
+        hasCompletedOnboarding: false,
+      };
+      
+      // 💾 Salvar usuário no estado e banco
+      const updatedUsers = [...allUsers, newUser];
+      onUpdateUsers(updatedUsers);
+      
+      // 📧 Enviar e-mail de convite
+      const emailResult = await emailService.sendInviteEmail({
+        toEmail: email,
+        toName: nome,
+        inviteToken,
+        tenantName: tenant.nome,
+        role,
+        invitedByName: user.nome,
+        primaryColor: globalConfig.primaryColor,
+      });
+      
+      if (emailResult.success) {
+        toast.success('✅ Convite enviado com sucesso! O usuário receberá um e-mail.');
+        setShowInviteModal(false);
+        (e.target as HTMLFormElement).reset();
+      } else {
+        toast.error(`❌ Usuário criado, mas erro ao enviar e-mail: ${emailResult.error}`);
+      }
+      
+    } catch (error: any) {
+      console.error('[ProfileView] Erro ao enviar convite:', error);
+      toast.error('❌ Erro ao processar convite. Tente novamente.');
+    } finally {
+      setInviteLoading(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'signature') => {
@@ -898,17 +950,26 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                <button 
                 type="button" 
                 onClick={() => setShowInviteModal(false)}
-                className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors"
+                disabled={inviteLoading}
+                className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                >
                  Cancelar
                </button>
                <button 
                 form="invite-form-final"
-                type="submit" 
-                className="flex-1 text-white py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all active:scale-95 hover:brightness-110"
+                type="submit"
+                disabled={inviteLoading}
+                className="flex-1 text-white py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all active:scale-95 hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 style={{ backgroundColor: primaryColor }}
                >
-                  Enviar Convite
+                 {inviteLoading ? (
+                   <>
+                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                     Enviando...
+                   </>
+                 ) : (
+                   'Enviar Convite'
+                 )}
                </button>
             </div>
           </motion.div>

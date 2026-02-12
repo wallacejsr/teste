@@ -97,6 +97,9 @@ export interface User {
   avatarUrl?: string;
   password?: string;
   lastPasswordChange?: string;
+  inviteToken?: string; // 🔐 Token único para primeiro acesso
+  inviteTokenExpiry?: string; // ⏰ Data de expiração do token (7 dias)
+  hasCompletedOnboarding?: boolean; // ✅ Se já definiu senha
 }
 
 export interface Unit {

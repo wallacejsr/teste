@@ -1,20 +1,23 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Lock, Mail, ChevronRight, UserPlus, Key, AlertCircle, CheckCircle } from 'lucide-react';
+import { Zap, Lock, Mail, ChevronRight, UserPlus, Key, AlertCircle, CheckCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { GlobalConfig } from '../types';
+import { GlobalConfig, User } from '../types';
 import { authService } from '../services/authService';
+import { dataSyncService } from '../services/dataService';
 
 interface LoginViewProps {
   onLogin: (email: string, password: string) => void;
   globalConfig: GlobalConfig;
   imagePreloaded?: boolean; // 🖼️ Flag indicando que imagem já foi precarregada
+  allUsers?: User[]; // 👥 Lista de usuários para validar token
+  onUpdateUsers?: (users: User[]) => void; // ✏️ Callback para atualizar usuários
 }
 
-type ViewMode = 'login' | 'signup' | 'reset';
+type ViewMode = 'login' | 'signup' | 'reset' | 'invite'; // ➕ Novo modo 'invite'
 
-const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePreloaded = false }) => {
+const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePreloaded = false, allUsers = [], onUpdateUsers }) => {
   const [mode, setMode] = useState<ViewMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,6 +28,9 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
   const [success, setSuccess] = useState('');
   // ✅ Usar imagePreloaded do App.tsx ao invés de preload interno
   const [imageReady, setImageReady] = useState(imagePreloaded);
+  // 🔑 Estados para token de convite
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [invitedUser, setInvitedUser] = useState<User | null>(null);
   const primaryColor = globalConfig.primaryColor || '#3b82f6';
   
   // ✨ Sincronizar imageReady com prop imagePreloaded
@@ -33,6 +39,43 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
       setImageReady(true);
     }
   }, [imagePreloaded]);
+
+  // 🔑 Detectar token de convite na URL (?invite=xxx)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('invite');
+    
+    if (token && allUsers && allUsers.length > 0) {
+      // Buscar usuário pelo token
+      const user = allUsers.find(u => u.inviteToken === token);
+      
+      if (user) {
+        // Validar expiração do token
+        const now = new Date();
+        const expiry = user.inviteTokenExpiry ? new Date(user.inviteTokenExpiry) : null;
+        
+        if (expiry && now > expiry) {
+          toast.error('❌ Token de convite expirado. Solicite um novo convite.');
+          return;
+        }
+        
+        if (user.hasCompletedOnboarding) {
+          toast.error('ℹ️ Este convite já foi usado. Faça login normalmente.');
+          return;
+        }
+        
+        // Token válido, mudar para modo invite
+        setInviteToken(token);
+        setInvitedUser(user);
+        setEmail(user.email);
+        setNome(user.nome);
+        setMode('invite');
+        toast.success(`👋 Bem-vindo, ${user.nome}! Configure sua senha para acessar o sistema.`);
+      } else {
+        toast.error('❌ Token de convite inválido.');
+      }
+    }
+  }, [allUsers]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,11 +195,79 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
     }
   };
 
+  // 🆕 Handler para completar onboarding (primeiro acesso via convite)
+  const handleCompleteOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (!invitedUser || !inviteToken) {
+      toast.error('Token de convite inválido.');
+      return;
+    }
+
+    if (!password.trim()) {
+      toast.error('Preencha a senha');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('As senhas não correspondem');
+      return;
+    }
+
+    const passwordCheck = authService.isStrongPassword(password);
+    if (!passwordCheck.valid) {
+      toast.error(passwordCheck.error || 'Senha fraca. Mínimo 8 caracteres, 1 maiúscula, 1 minúscula, 1 número');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Atualizar usuário: remover token, marcar onboarding completo, criar senha
+      const updatedUser: User = {
+        ...invitedUser,
+        password, // Em produção, deve ser hash via backend
+        hasCompletedOnboarding: true,
+        inviteToken: undefined,
+        inviteTokenExpiry: undefined,
+        lastPasswordChange: new Date().toISOString(),
+      };
+
+      // Atualizar no estado
+      if (onUpdateUsers && allUsers) {
+        const updatedUsers = allUsers.map(u => 
+          u.id === updatedUser.id ? updatedUser : u
+        );
+        onUpdateUsers(updatedUsers);
+
+        // Persistir no banco
+        await dataSyncService.syncUsers(updatedUsers, invitedUser.tenantId);
+      }
+
+      toast.success('✅ Senha configurada com sucesso! Você será redirecionado...');
+      
+      // Fazer login automático
+      setTimeout(() => {
+        onLogin(updatedUser.email, password);
+      }, 1500);
+
+    } catch (error: any) {
+      console.error('[LoginView] Erro ao completar onboarding:', error);
+      toast.error('❌ Erro ao configurar senha. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     if (mode === 'login') {
       handleLogin(e);
     } else if (mode === 'signup') {
       handleSignup(e);
+    } else if (mode === 'invite') {
+      handleCompleteOnboarding(e);
     } else {
       handlePasswordReset(e);
     }
@@ -250,14 +361,39 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
               {globalConfig.softwareName}
             </h1>
             <p className="text-xs font-bold text-slate-500 uppercase tracking-[0.15em]">
-              {mode === 'login' ? 'Acesso à Plataforma' : mode === 'signup' ? 'Criar Nova Conta' : 'Recuperar Acesso'}
+              {mode === 'login' ? 'Acesso à Plataforma' : 
+               mode === 'signup' ? 'Criar Nova Conta' : 
+               mode === 'invite' ? '🎉 Configure Seu Acesso' : 
+               'Recuperar Acesso'}
             </p>
           </div>
 
+          {/* 🆕 Banner de Convite (modo invite) */}
+          {mode === 'invite' && invitedUser && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-5 mb-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="text-white" size={20} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-green-900 mb-1">Bem-vindo, {invitedUser.nome}!</h3>
+                  <p className="text-xs text-green-700 leading-relaxed">
+                    Você foi convidado para <strong>{invitedUser.role}</strong>. Configure uma senha segura para acessar o sistema.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Formulário */}
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Nome (apenas signup) */}
-            {mode === 'signup' && (
+            {/* Nome (signup ou invite - readonly) */}
+            {(mode === 'signup' || mode === 'invite') && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -273,17 +409,19 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                     onChange={(e) => setNome(e.target.value)}
                     placeholder="João da Silva"
                     required
-                    className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
+                    readOnly={mode === 'invite'}
+                    className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300 read-only:bg-slate-50 read-only:cursor-not-allowed"
                   />
                 </div>
               </motion.div>
             )}
 
-            {/* Email */}
+            {/* Email (todos os modos, readonly em invite) */}
+            {(mode === 'login' || mode === 'signup' || mode === 'reset' || mode === 'invite') && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: mode === 'signup' ? 0.1 : 0 }}
+              transition={{ duration: 0.4, delay: (mode === 'signup' || mode === 'invite') ? 0.1 : 0 }}
               className="space-y-2"
             >
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wide block">E-mail</label>
@@ -296,20 +434,24 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                   placeholder="seu@email.com"
                   autoComplete="email"
                   required
-                  className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
+                  readOnly={mode === 'invite'}
+                  className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300 read-only:bg-slate-50 read-only:cursor-not-allowed"
                 />
               </div>
             </motion.div>
+            )}
 
-            {/* Senha (login e signup) */}
-            {mode !== 'reset' && (
+            {/* Senha (login, signup, invite) */}
+            {(mode === 'login' || mode === 'signup' || mode === 'invite') && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: mode === 'signup' ? 0.2 : 0.1 }}
+                transition={{ duration: 0.4, delay: (mode === 'signup' || mode === 'invite') ? 0.2 : 0.1 }}
                 className="space-y-2"
               >
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wide block">Senha</label>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wide block">
+                  {mode === 'invite' ? 'Criar Senha' : 'Senha'}
+                </label>
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
                   <input 
@@ -317,19 +459,19 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    autoComplete="current-password"
+                    autoComplete={mode === 'invite' ? 'new-password' : 'current-password'}
                     required
                     className="w-full bg-white border border-slate-200 px-12 py-3 rounded-xl text-slate-900 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all placeholder:text-slate-400 hover:border-slate-300"
                   />
                 </div>
-                {mode === 'signup' && (
+                {(mode === 'signup' || mode === 'invite') && (
                   <p className="text-xs text-slate-500 mt-2">Mínimo 8 caracteres, 1 maiúscula, 1 minúscula, 1 número</p>
                 )}
               </motion.div>
             )}
 
-            {/* Confirmar Senha (apenas signup) */}
-            {mode === 'signup' && (
+            {/* Confirmar Senha (signup e invite) */}
+            {(mode === 'signup' || mode === 'invite') && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -356,7 +498,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
             <motion.button 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: mode === 'signup' ? 0.4 : mode === 'reset' ? 0.2 : 0.2 }}
+              transition={{ duration: 0.4, delay: (mode === 'signup' || mode === 'invite') ? 0.4 : mode === 'reset' ? 0.2 : 0.2 }}
               type="submit"
               disabled={loading}
               className="w-full py-3.5 rounded-xl text-white font-bold text-sm uppercase tracking-wide shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 hover:shadow-2xl hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:brightness-100 mt-6"
@@ -373,6 +515,8 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
                 <>Acessar Plataforma <ChevronRight size={16} /></>
               ) : mode === 'signup' ? (
                 <>Criar Conta <UserPlus size={16} /></>
+              ) : mode === 'invite' ? (
+                <>Configurar Senha e Entrar <ShieldCheck size={16} /></>
               ) : (
                 <>Enviar Email <Key size={16} /></>
               )}

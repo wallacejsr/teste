@@ -1278,7 +1278,13 @@ const App: React.FC = () => {
     // ✨ REVELAÇÃO: Agora sim, tudo pronto para revelar LoginView com fade-in
     return (
       <>
-        <LoginView onLogin={handleLogin} globalConfig={globalConfig} imagePreloaded={true} />
+        <LoginView 
+          onLogin={handleLogin} 
+          globalConfig={globalConfig} 
+          imagePreloaded={true}
+          allUsers={allUsers}
+          onUpdateUsers={setAllUsers}
+        />
         <Toaster position="bottom-right" richColors closeButton />
       </>
     );
