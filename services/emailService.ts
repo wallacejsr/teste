@@ -1,24 +1,23 @@
 /**
  * 📧 EMAIL SERVICE - Sistema de Envio de E-mails
  * 
- * ✅ MIGRADO PARA SUPABASE EDGE FUNCTIONS
+ * ✅ MIGRADO PARA EMAILJS (Padronização com Gestão de Empresas)
  * 
  * Arquitetura:
- * - Frontend (este arquivo): Chama Supabase Edge Function
- * - Backend (Edge Function): Integra com Resend API
+ * - Frontend: Chama EmailJS API diretamente
+ * - Backend: EmailJS cuida do disparo (sem Edge Function necessária)
  * 
  * Benefícios:
- * - 🔒 API keys protegidas (secrets do Supabase)
- * - ✅ Sem problemas de CORS
- * - ⚡ Performance (edge computing)
- * - 🛡️ Segurança (chaves nunca expostas no frontend)
+ * - ✅ Sem necessidade de domínio verificado
+ * - ✅ Mesmo padrão usado na Gestão de Empresas
+ * - ✅ API keys públicas (safe to expose)
+ * - 🎯 100% frontend (sem servidor)
  * 
- * Deploy:
- * supabase functions deploy send-invite-email
- * supabase secrets set RESEND_API_KEY=re_sua_chave_aqui
+ * Configuração:
+ * - VITE_EMAILJS_SERVICE_ID
+ * - VITE_EMAILJS_TEMPLATE_ID (criar template de convite)
+ * - VITE_EMAILJS_PUBLIC_KEY
  */
-
-import { getSupabaseClient } from './supabaseClient';
 
 interface SendInviteEmailParams {
   toEmail: string;
@@ -33,9 +32,9 @@ interface SendInviteEmailParams {
 /**
  * Envia e-mail de convite para novo usuário
  * 
- * ✅ NOVA IMPLEMENTAÇÃO: Chama Supabase Edge Function
+ * ✅ NOVA IMPLEMENTAÇÃO: EmailJS API (mesmo padrão da Gestão de Empresas)
+ * - Sem necessidade de domínio verificado
  * - Sem problemas de CORS
- * - API keys protegidas no servidor
  * - Validações robustas
  * 
  * @param params - Parâmetros do convite
@@ -64,43 +63,47 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
       throw new Error('Formato de e-mail inválido');
     }
 
-    // Obter cliente Supabase
-    const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-    const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+    // 📧 Configuração do EmailJS
+    const serviceId = (import.meta as any).env?.VITE_EMAILJS_SERVICE_ID || '';
+    const templateId = (import.meta as any).env?.VITE_EMAILJS_INVITE_TEMPLATE_ID || 
+                       (import.meta as any).env?.VITE_EMAILJS_TEMPLATE_ID || ''; // Fallback para template padrão
+    const publicKey = (import.meta as any).env?.VITE_EMAILJS_PUBLIC_KEY || '';
     
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Credenciais do Supabase não configuradas');
+    if (!serviceId || !templateId || !publicKey) {
+      throw new Error('EmailJS não configurado - verifique variáveis de ambiente');
     }
-    
-    const supabase = getSupabaseClient(supabaseUrl, supabaseKey);
 
-    // 🚀 Chamar Supabase Edge Function
-    const { data, error } = await supabase.functions.invoke('send-invite-email', {
-      body: {
-        toEmail: cleanEmail,
-        toName: params.toName.trim(),
-        inviteToken: params.inviteToken,
-        tenantName: params.tenantName || 'Sistema',
-        role: params.role || 'USUARIO',
-        invitedByName: params.invitedByName || 'Administrador',
-        primaryColor: params.primaryColor || '#3b82f6',
-        appUrl: window.location.origin, // URL da aplicação atual
-      },
+    // 🔗 Gerar URL de convite
+    const inviteUrl = `${window.location.origin}/?invite=${params.inviteToken}`;
+    const primaryColor = params.primaryColor || '#3b82f6';
+
+    // 📋 Preparar dados do template EmailJS
+    const templateParams = {
+      to_email: cleanEmail,
+      to_name: params.toName,
+      tenant_name: params.tenantName || 'Sistema',
+      role: params.role || 'USUARIO',
+      invited_by: params.invitedByName || 'Administrador',
+      invite_url: inviteUrl,
+      primary_color: primaryColor,
+      app_url: window.location.origin,
+    };
+
+    // 🚀 Chamar API do EmailJS
+    const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_id: serviceId,
+        template_id: templateId,
+        user_id: publicKey,
+        template_params: templateParams
+      })
     });
 
-    if (error) {
-      return { 
-        success: false, 
-        error: error.message || 'Erro ao chamar função de envio de e-mail' 
-      };
-    }
-
-    // Verificar resposta da função
-    if (data && !data.success) {
-      return { 
-        success: false, 
-        error: data.error || 'Erro desconhecido no envio de e-mail' 
-      };
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Erro desconhecido');
+      throw new Error(`EmailJS API error: ${response.status} - ${errorText}`);
     }
 
     return { success: true };
@@ -116,7 +119,7 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
 /**
  * Envia e-mail de redefinição de senha (futuro)
  * 
- * TODO: Implementar Edge Function separada para reset de senha
+ * TODO: Implementar com EmailJS usando template específico
  */
 export async function sendPasswordResetEmail(toEmail: string, resetToken: string): Promise<{ success: boolean; error?: string }> {
   return { success: false, error: 'Funcionalidade não implementada' };
