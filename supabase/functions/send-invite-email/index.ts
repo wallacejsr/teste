@@ -7,8 +7,13 @@
  * - 🔒 Proteger API keys (secrets do Supabase)
  * - ⚡ Performance (edge computing)
  * 
+ * 🔓 CONFIGURAÇÃO: Função PÚBLICA (sem validação JWT)
+ * Esta função não valida tokens JWT pois o convite é enviado
+ * antes do usuário ter uma conta. A segurança é feita no frontend
+ * validando permissões do usuário que envia o convite.
+ * 
  * Deploy:
- * supabase functions deploy send-invite-email
+ * supabase functions deploy send-invite-email --no-verify-jwt
  * supabase secrets set RESEND_API_KEY=re_sua_chave_aqui
  */
 

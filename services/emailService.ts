@@ -43,8 +43,8 @@ interface SendInviteEmailParams {
  */
 export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ success: boolean; error?: string }> {
   try {
-    // 🔒 HOTFIX: Validação robusta de e-mail antes de enviar
-    const cleanEmail = (params.toEmail || '').trim().toLowerCase();
+    // 🔒 HOTFIX: Blindagem definitiva de e-mail (null/undefined → string)
+    const cleanEmail = String(params.toEmail || '').trim().toLowerCase();
     
     if (!cleanEmail || cleanEmail === '') {
       throw new Error('E-mail do destinatário inválido ou vazio');
@@ -89,7 +89,6 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
     });
 
     if (error) {
-      console.error('[EmailService] Erro da Edge Function:', error);
       return { 
         success: false, 
         error: error.message || 'Erro ao chamar função de envio de e-mail' 
@@ -98,18 +97,15 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
 
     // Verificar resposta da função
     if (data && !data.success) {
-      console.error('[EmailService] Erro no envio:', data.error);
       return { 
         success: false, 
         error: data.error || 'Erro desconhecido no envio de e-mail' 
       };
     }
 
-    console.log('[EmailService] E-mail enviado com sucesso via Edge Function');
     return { success: true };
 
   } catch (error: any) {
-    console.error('[EmailService] Erro crítico no envio:', error);
     return { 
       success: false, 
       error: error.message || 'Erro desconhecido ao enviar e-mail' 
@@ -123,7 +119,6 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
  * TODO: Implementar Edge Function separada para reset de senha
  */
 export async function sendPasswordResetEmail(toEmail: string, resetToken: string): Promise<{ success: boolean; error?: string }> {
-  console.log('[EmailService] Reset de senha ainda não implementado');
   return { success: false, error: 'Funcionalidade não implementada' };
 }
 

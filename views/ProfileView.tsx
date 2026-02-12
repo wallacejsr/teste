@@ -158,8 +158,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       
       // 📧 Enviar e-mail de convite
       const emailResult = await emailService.sendInviteEmail({
-        toEmail: email,
-        toName: nome,
+        toEmail: String(email || '').trim().toLowerCase(),
+        toName: String(nome || '').trim(),
         inviteToken,
         tenantName: tenant.nome,
         role,

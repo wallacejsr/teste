@@ -98,8 +98,8 @@ supabase link --project-ref seu-project-id
 ### Deploy da Função
 
 ```bash
-# 1. Fazer deploy da função
-supabase functions deploy send-invite-email
+# 1. Fazer deploy da função (SEM validação JWT - função pública)
+supabase functions deploy send-invite-email --no-verify-jwt
 
 # 2. Configurar secret da API key do Resend
 supabase secrets set RESEND_API_KEY=re_sua_chave_real_aqui
@@ -299,18 +299,20 @@ dist/assets/index-7YcM78j2.js  1,936.65 kB │ gzip: 544.45 kB
 
 ## 🐛 Troubleshooting
 
-### 1. Erro: "Function not found"
+### 1. Erro: "Function not found" ou "401 Unauthorized"
 
-**Problema:** Edge Function não deployada ou nome incorreto.
+**Problema:** Edge Function não deployada, nome incorreto, ou tentando validar JWT.
 
 **Solução:**
 ```bash
 # Listar funções deployadas
 supabase functions list
 
-# Fazer deploy novamente
-supabase functions deploy send-invite-email
+# Fazer deploy novamente (SEM validação JWT - função pública)
+supabase functions deploy send-invite-email --no-verify-jwt
 ```
+
+**⚠️ IMPORTANTE:** Use a flag `--no-verify-jwt` porque a função não pode validar JWT (usuário ainda não existe). A segurança é feita no frontend validando permissões do usuário que envia o convite.
 
 ---
 
