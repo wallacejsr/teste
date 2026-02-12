@@ -19,8 +19,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// 🔒 API Key vem dos secrets do Supabase (não exposta no frontend)
-const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+// 🔒 Configuração de e-mail
 const FROM_EMAIL = 'WSR Soluções <onboarding@wsrsolucoes.com.br>';
 const FROM_EMAIL_DEV = 'onboarding@resend.dev';
 
@@ -170,13 +169,27 @@ function getInviteEmailTemplate(params: InviteEmailRequest): string {
  */
 async function sendEmailViaResend(params: InviteEmailRequest): Promise<{ success: boolean; error?: string }> {
   try {
+    // 🐛 DEBUG: Log do payload recebido
+    console.log('[DEBUG] Payload recebido:', {
+      toEmail: params.toEmail,
+      toName: params.toName,
+      tenantName: params.tenantName,
+      role: params.role,
+      hasToken: !!params.inviteToken,
+    });
+
     // Validar API key
-    if (!RESEND_API_KEY || RESEND_API_KEY.trim() === '') {
+    const apiKey = Deno.env.get('RESEND_API_KEY');
+    console.log('[DEBUG] RESEND_API_KEY configurada:', !!apiKey);
+    
+    if (!apiKey || apiKey.trim() === '') {
       throw new Error('RESEND_API_KEY não configurada nos secrets do Supabase');
     }
 
-    // 🔒 HOTFIX: Validação robusta de e-mail
-    const cleanEmail = (params.toEmail || '').trim().toLowerCase();
+    // 🔒 HOTFIX: Blindagem definitiva de e-mail (null/undefined → string)
+    const cleanEmail = String(params.toEmail || '').trim().toLowerCase();
+    console.log('[DEBUG] E-mail limpo:', cleanEmail);
+    
     if (!cleanEmail || cleanEmail === '') {
       throw new Error('E-mail do destinatário inválido ou vazio');
     }
@@ -187,16 +200,16 @@ async function sendEmailViaResend(params: InviteEmailRequest): Promise<{ success
       throw new Error('Formato de e-mail inválido');
     }
 
-    // Decidir remetente (dev vs produção)
-    const fromEmail = RESEND_API_KEY.startsWith('re_') && RESEND_API_KEY.length > 20 
-      ? FROM_EMAIL 
-      : FROM_EMAIL_DEV;
+    // 🔧 HOTFIX: Forçar uso de onboarding@resend.dev (domínio não verificado)
+    const fromEmail = FROM_EMAIL_DEV;
+    console.log('[DEBUG] Usando remetente:', fromEmail);
 
     // Chamar API do Resend
+    console.log('[DEBUG] Chamando Resend API...');
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -207,13 +220,16 @@ async function sendEmailViaResend(params: InviteEmailRequest): Promise<{ success
       }),
     });
 
+    console.log('[DEBUG] Resend status:', response.status);
+
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({ message: 'Erro ao parsear resposta' }));
+      console.error('[DEBUG] Resend error:', errorData);
       throw new Error(`Resend API error: ${errorData.message || response.statusText}`);
     }
 
     const data = await response.json();
-    console.log('[SendInviteEmail] E-mail enviado com sucesso:', {
+    console.log('[SendInviteEmail] ✅ E-mail enviado com sucesso:', {
       id: data.id,
       to: cleanEmail,
       tenant: params.tenantName,
@@ -248,9 +264,13 @@ serve(async (req) => {
   try {
     // Parse request body
     const body: InviteEmailRequest = await req.json();
+    
+    // 🐛 DEBUG: Log do payload completo
+    console.log('[DEBUG] Payload recebido no handler:', JSON.stringify(body, null, 2));
 
     // Validações básicas
     if (!body.toEmail || !body.toName || !body.inviteToken) {
+      console.error('[DEBUG] Validação falhou - campos obrigatórios faltando');
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -263,8 +283,12 @@ serve(async (req) => {
       );
     }
 
+    console.log('[DEBUG] Validações OK, enviando e-mail...');
+    
     // Enviar e-mail
     const result = await sendEmailViaResend(body);
+    
+    console.log('[DEBUG] Resultado do envio:', result);
 
     // Retornar resultado
     return new Response(
@@ -276,11 +300,16 @@ serve(async (req) => {
     );
 
   } catch (error: any) {
-    console.error('[SendInviteEmail] Erro crítico:', error);
+    console.error('[SendInviteEmail] ❌ Erro crítico:', error);
+    console.error('[DEBUG] Stack trace:', error.stack);
+    
+    // Garantir retorno JSON em todos os casos
+    const errorMessage = error?.message || String(error) || 'Erro interno do servidor';
+    
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error.message || 'Erro interno do servidor' 
+        error: errorMessage
       }),
       { 
         status: 500, 

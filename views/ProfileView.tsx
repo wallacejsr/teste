@@ -157,14 +157,30 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       onUpdateUsers(updatedUsers);
       
       // 📧 Enviar e-mail de convite
+      // 🔒 HOTFIX: Blindagem definitiva de dados antes de enviar
+      const safeEmail = String(email || '').trim().toLowerCase();
+      const safeName = String(nome || '').trim();
+      
+      if (!safeEmail) {
+        toast.error('❌ E-mail obrigatório para enviar convite.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      if (!safeName) {
+        toast.error('❌ Nome obrigatório para enviar convite.');
+        setInviteLoading(false);
+        return;
+      }
+      
       const emailResult = await emailService.sendInviteEmail({
-        toEmail: String(email || '').trim().toLowerCase(),
-        toName: String(nome || '').trim(),
+        toEmail: safeEmail,
+        toName: safeName,
         inviteToken,
-        tenantName: tenant.nome,
+        tenantName: tenant.nome || 'Sistema',
         role,
-        invitedByName: user.nome,
-        primaryColor: globalConfig.primaryColor,
+        invitedByName: user.nome || 'Administrador',
+        primaryColor: globalConfig.primaryColor || '#3b82f6',
       });
       
       if (emailResult.success) {
