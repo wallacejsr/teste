@@ -1328,8 +1328,46 @@ class DataSyncService {
         // Sucesso: remover da fila
         itemsToRemove.push(item.id);
         console.log(`[Sync] Queue item processed: ${item.id}`);
-      } catch (error) {
+      } catch (error: any) {
         console.error(`[Sync] Error processing queue item ${item.id}:`, error);
+        
+        // 🔒 HOTFIX: Tratamento especial para erros 401 (sessão expirada)
+        const status = error?.status || error?.code || 0;
+        if (status === 401 || status === '401') {
+          console.warn('[Sync] Sessão expirada detectada, tentando refresh...');
+          
+          try {
+            // Tentar refresh da sessão
+            const { data: { session }, error: refreshError } = await this.supabase.auth.refreshSession();
+            
+            if (refreshError || !session) {
+              console.error('[Sync] Refresh falhou, redirecionando para login...');
+              // Limpar fila e redirecionar para login
+              this.syncQueue = [];
+              localStorage.removeItem('ep_sync_queue');
+              window.location.href = '/?error=session_expired';
+              break;
+            }
+            
+            console.log('[Sync] Sessão renovada com sucesso');
+            // Não incrementar retries, tentar novamente
+            continue;
+          } catch (refreshError) {
+            console.error('[Sync] Erro crítico no refresh:', refreshError);
+            this.syncQueue = [];
+            localStorage.removeItem('ep_sync_queue');
+            window.location.href = '/?error=auth_failed';
+            break;
+          }
+        }
+        
+        // 🧹 HOTFIX: Remover da fila se erro 400 (dados inválidos irrecuperáveis)
+        if (status === 400 || status === '400') {
+          console.warn(`[Sync] Erro 400 em ${item.id}, removendo da fila (dados inválidos)`);
+          itemsToRemove.push(item.id);
+          continue;
+        }
+        
         item.retries++;
         
         if (item.retries > 5) {
