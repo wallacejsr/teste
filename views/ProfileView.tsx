@@ -206,8 +206,16 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       
       if (emailResult.success) {
         toast.success('✅ Convite enviado com sucesso! O usuário receberá um e-mail.');
+        
+        // 🧹 Limpeza de estado segura
         setShowInviteModal(false);
         (e.target as HTMLFormElement).reset();
+        
+        // Forçar limpeza de variáveis (previne cache de FormData)
+        setTimeout(() => {
+          const form = document.getElementById('invite-form-final') as HTMLFormElement;
+          if (form) form.reset();
+        }, 100);
       } else {
         toast.error(`❌ Convite criado, mas erro ao enviar e-mail: ${emailResult.error}`);
       }

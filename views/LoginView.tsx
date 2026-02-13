@@ -53,7 +53,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
     };
 
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('invite');
+    const token = urlParams.get('token') || urlParams.get('invite'); // Compatibilidade retroativa
     
     if (token) {
       // Limpar sessão antes de processar convite
