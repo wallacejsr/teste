@@ -43,6 +43,9 @@ class DataSyncService {
   private isProcessingQueue = false;
   private channels: Map<string, RealtimeChannel> = new Map();
   
+  // 🎭 Modo Simulação: Bloqueia sincronização quando SUPERADMIN está visualizando dados de outra empresa
+  private isSimulationMode = false;
+  
   // Sistema de notificação de erros de permissão
   private permissionErrorCallback: ((message: string) => void) | null = null;
   private lastPermissionErrorTime: number = 0;
@@ -144,6 +147,22 @@ class DataSyncService {
    * Construtor privado (Singleton pattern)
    */
   private constructor() {}
+
+  /**
+   * 🎭 Ativar/Desativar Modo Simulação
+   * Quando ativado, bloqueia todas as operações de sincronização (INSERT/UPDATE/DELETE)
+   */
+  setSimulationMode(isSimulating: boolean) {
+    this.isSimulationMode = isSimulating;
+    console.log(`[DataSync] 🎭 Modo Simulação: ${isSimulating ? 'ATIVADO' : 'DESATIVADO'}`);
+  }
+
+  /**
+   * Verificar se está em modo simulação
+   */
+  isSimulating(): boolean {
+    return this.isSimulationMode;
+  }
 
   /**
    * Inicializar cliente Supabase (Singleton - chamado apenas uma vez)
@@ -914,6 +933,13 @@ class DataSyncService {
    */
   async bulkSyncTasks(tasks: Task[], userId: string, tenantId: string): Promise<Map<string, string>> {
     const idConversions = new Map<string, string>();
+    
+    // 🎭 BLOQUEIO: Não sincronizar em modo simulação
+    if (this.isSimulationMode) {
+      console.log('[DataSync] 🎭 Sincronização bloqueada (Modo Simulação ativo)');
+      return idConversions;
+    }
+    
     if (!this.supabase) {
       tasks.forEach(task => this.enqueueOperation('update', 'tasks', task, tenantId));
       throw new Error('Offline - operações enfileiradas');
@@ -963,6 +989,12 @@ class DataSyncService {
    */
   async syncProjects(projects: Project[], userId: string, tenantId: string): Promise<Map<string, string>> {
     const idConversions = new Map<string, string>();
+    
+    // 🎭 BLOQUEIO: Não sincronizar em modo simulação
+    if (this.isSimulationMode) {
+      console.log('[DataSync] 🎭 Sincronização bloqueada (Modo Simulação ativo)');
+      return idConversions;
+    }
     
     if (!this.supabase) {
       projects.forEach(p => this.enqueueOperation('update', 'projects', p, tenantId));
@@ -1064,6 +1096,13 @@ class DataSyncService {
    */
   async syncDailyLogs(logs: DailyLog[], userId: string, tenantId: string): Promise<Map<string, string>> {
     const idConversions = new Map<string, string>();
+    
+    // 🎭 BLOQUEIO: Não sincronizar em modo simulação
+    if (this.isSimulationMode) {
+      console.log('[DataSync] 🎭 Sincronização bloqueada (Modo Simulação ativo)');
+      return idConversions;
+    }
+    
     if (!this.supabase) {
       logs.forEach(l => {
         let finalId = l.id;

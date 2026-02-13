@@ -948,6 +948,9 @@ const App: React.FC = () => {
                 }
                 setIsSimulating(true);
                 
+                // 🎭 Ativar modo simulação no DataSyncService
+                dataSyncService.setSimulationMode(true);
+                
                 // 🧹 Limpar cache de dados antigos
                 setProjects([]);
                 setTasks([]);
@@ -984,6 +987,7 @@ const App: React.FC = () => {
                   setOriginalSuperAdmin(currentUser);
                 }
                 setIsSimulating(true);
+                dataSyncService.setSimulationMode(true);
                 setProjects([]);
                 setTasks([]);
                 setResources([]);
@@ -1509,6 +1513,9 @@ const App: React.FC = () => {
           <button
             onClick={async () => {
               toast.loading('Saindo da simulação...', { id: 'exit-simulation' });
+              
+              // 🎭 Desativar modo simulação no DataSyncService
+              dataSyncService.setSimulationMode(false);
               
               // 🧹 Limpar dados da empresa simulada
               setProjects([]);
