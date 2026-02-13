@@ -18,7 +18,7 @@ import ModernLoading from './components/ModernLoading';
 import ConfirmationDialog from './components/ConfirmationDialog';
 import { useConfirmation } from './hooks/useConfirmation';
 import { User, Project, Task, Resource, DailyLog, Role, Tenant, LicenseStatus, GlobalConfig, PlanTemplate } from './types';
-import { AlertCircle, MessageSquare, Wifi, WifiOff } from 'lucide-react';
+import { AlertCircle, MessageSquare, Wifi, WifiOff, X } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { dataSyncService } from './services/dataService';
 import { DataSyncService } from './services/dataService';
@@ -74,6 +74,10 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'online' | 'offline' | 'syncing'>('offline');
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  
+  // 🎭 Estado de Simulação (Impersonate)
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [originalSuperAdmin, setOriginalSuperAdmin] = useState<User | null>(null);
   
   // 🎨 ANTI-FLICKER: Inicializar com valores vazios para evitar 'ghost branding' (ex: PROJEX MASTER)
   // Valores reais serão carregados do banco ANTES de authInitialized=true
@@ -529,7 +533,8 @@ const App: React.FC = () => {
 
   // Carregar dados do Supabase
   const loadDataFromSupabase = async () => {
-    if (!currentUser.tenantId || currentUser.role === Role.SUPERADMIN) return;
+    // 🎭 Permitir carregamento se estiver em modo simulação
+    if (!currentUser.tenantId || (currentUser.role === Role.SUPERADMIN && !isSimulating)) return;
     
     setIsLoadingData(true);
     setSyncStatus('syncing');
@@ -936,7 +941,37 @@ const App: React.FC = () => {
               allDailyLogs={dailyLogs}
               plansConfig={plansConfig}
               onUpdatePlansConfig={setPlansConfig}
-              onSimulateAccess={(user) => { setCurrentUser(user); setActiveTab('dashboard'); }}
+              onSimulateAccess={async (user) => {
+                // 🎭 Ativar modo simulação
+                if (!isSimulating) {
+                  setOriginalSuperAdmin(currentUser);
+                }
+                setIsSimulating(true);
+                
+                // 🧹 Limpar cache de dados antigos
+                setProjects([]);
+                setTasks([]);
+                setResources([]);
+                setDailyLogs([]);
+                
+                // 👤 Mudar para o usuário simulado
+                setCurrentUser(user);
+                setActiveTab('dashboard');
+                
+                // 📥 Carregar dados da empresa simulada
+                toast.loading('Carregando dados da empresa...', { id: 'simulate-loading' });
+                
+                // Pequeno delay para garantir que o estado foi atualizado
+                setTimeout(async () => {
+                  try {
+                    await loadDataFromSupabase();
+                    toast.success('✅ Simulação ativada!', { id: 'simulate-loading' });
+                  } catch (error) {
+                    console.error('Erro ao carregar dados da simulação:', error);
+                    toast.error('❌ Erro ao carregar dados', { id: 'simulate-loading' });
+                  }
+                }, 100);
+              }}
             />
           );
         case 'config':
@@ -944,7 +979,28 @@ const App: React.FC = () => {
         case 'audit':
           return <AuditView />;
         default:
-          return <MasterAdminView activeTab="master-dash" globalConfig={globalConfig} onUpdateGlobalConfig={setGlobalConfig} allTenants={tenants} onUpdateTenants={setTenants} allUsers={allUsers} onUpdateUsers={setAllUsers} allProjects={projects} allDailyLogs={dailyLogs} plansConfig={plansConfig} onUpdatePlansConfig={setPlansConfig} onSimulateAccess={(user) => { setCurrentUser(user); setActiveTab('dashboard'); }} />;
+          return <MasterAdminView activeTab="master-dash" globalConfig={globalConfig} onUpdateGlobalConfig={setGlobalConfig} allTenants={tenants} onUpdateTenants={setTenants} allUsers={allUsers} onUpdateUsers={setAllUsers} allProjects={projects} allDailyLogs={dailyLogs} plansConfig={plansConfig} onUpdatePlansConfig={setPlansConfig} onSimulateAccess={async (user) => {
+                if (!isSimulating) {
+                  setOriginalSuperAdmin(currentUser);
+                }
+                setIsSimulating(true);
+                setProjects([]);
+                setTasks([]);
+                setResources([]);
+                setDailyLogs([]);
+                setCurrentUser(user);
+                setActiveTab('dashboard');
+                toast.loading('Carregando dados da empresa...', { id: 'simulate-loading' });
+                setTimeout(async () => {
+                  try {
+                    await loadDataFromSupabase();
+                    toast.success('✅ Simulação ativada!', { id: 'simulate-loading' });
+                  } catch (error) {
+                    console.error('Erro ao carregar dados da simulação:', error);
+                    toast.error('❌ Erro ao carregar dados', { id: 'simulate-loading' });
+                  }
+                }, 100);
+              }} />;
       }
     }
 
@@ -1447,6 +1503,43 @@ const App: React.FC = () => {
 
   return (
     <>
+      {/* 🎭 Botão Flutuante: Sair da Simulação */}
+      {isSimulating && originalSuperAdmin && (
+        <div className="fixed top-4 right-4 z-[9999] animate-in fade-in slide-in-from-top duration-500">
+          <button
+            onClick={async () => {
+              toast.loading('Saindo da simulação...', { id: 'exit-simulation' });
+              
+              // 🧹 Limpar dados da empresa simulada
+              setProjects([]);
+              setTasks([]);
+              setResources([]);
+              setDailyLogs([]);
+              
+              // 👤 Restaurar SUPERADMIN original
+              setCurrentUser(originalSuperAdmin);
+              setIsSimulating(false);
+              setOriginalSuperAdmin(null);
+              setActiveTab('master-dash');
+              
+              // 📥 Recarregar tenants
+              await loadAllTenantsFromSupabase();
+              
+              toast.success('✅ Simulação encerrada!', { id: 'exit-simulation' });
+            }}
+            className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl shadow-2xl hover:shadow-red-500/50 hover:scale-105 transition-all font-black text-xs uppercase tracking-widest"
+          >
+            <span className="flex items-center gap-2">
+              🎭 Modo Simulação
+              <span className="text-[10px] font-bold opacity-80">
+                ({currentUser.nome} @ {tenantForUI.nome})
+              </span>
+            </span>
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
       <Layout 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
