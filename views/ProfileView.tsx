@@ -100,31 +100,36 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       const formData = new FormData(e.currentTarget);
       const nome = formData.get('nome') as string;
-      const email = formData.get('email') as string;
+      const inviteEmail = formData.get('email');
       const role = formData.get('role') as Role;
       const cargo = formData.get('cargo') as string;
       
-      // 🔒 HOTFIX: Validações de segurança antes de processar
+      // 🔒 BLINDAGEM: Captura segura de e-mail (previne TypeError: toLowerCase())
+      const targetEmail = String(inviteEmail || '').trim().toLowerCase();
+      
+      // 🔒 VALIDAÇÃO PREVENTIVA: E-mail obrigatório
+      if (!targetEmail) {
+        toast.error('❌ E-mail não detectado. Por favor, preencha o campo de e-mail.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      // 🔒 VALIDAÇÃO: Nome obrigatório
       if (!nome || typeof nome !== 'string' || nome.trim() === '') {
         toast.error('❌ Por favor, preencha o nome do convidado.');
         setInviteLoading(false);
         return;
       }
       
-      if (!email || typeof email !== 'string' || email.trim() === '') {
-        toast.error('❌ Por favor, preencha o e-mail do convidado.');
-        setInviteLoading(false);
-        return;
-      }
-      
-      // Validar formato básico de e-mail
+      // 🔒 VALIDAÇÃO: Formato de e-mail
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email.trim())) {
+      if (!emailRegex.test(targetEmail)) {
         toast.error('❌ Formato de e-mail inválido.');
         setInviteLoading(false);
         return;
       }
       
+      // 🔒 VALIDAÇÃO: Role obrigatório
       if (!role) {
         toast.error('❌ Por favor, selecione o nível de acesso.');
         setInviteLoading(false);
@@ -138,11 +143,44 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + 7);
       
-      // 👤 Criar novo usuário com token
+      // 💾 PRIORIDADE 1: Salvar convite na tabela user_invites (BANCO PRIMEIRO)
+      const inviteData = {
+        token: inviteToken,
+        email: targetEmail,
+        name: nome.trim(),
+        tenant_id: tenant.id,
+        role: role,
+        invited_by: user.id,
+        expires_at: expiryDate.toISOString(),
+        status: 'pending',
+        metadata: {
+          cargo: cargo || '',
+          invited_by_name: user.nome || 'Administrador',
+          tenant_name: tenant.nome || 'Sistema'
+        }
+      };
+      
+      const { data: dbInvite, error: dbError } = await dataSyncService.supabase
+        .from('user_invites')
+        .insert(inviteData)
+        .select()
+        .single();
+      
+      if (dbError) {
+        console.error('[ProfileView] Erro ao salvar convite no banco:', dbError);
+        toast.error('❌ Erro ao criar convite no banco de dados. Tente novamente.');
+        setInviteLoading(false);
+        return;
+      }
+      
+      // 📊 LOG DE INSERÇÃO: Confirma criação do token
+      console.log('✅ Convite salvo no banco:', dbInvite);
+      
+      // 👤 Criar novo usuário no estado local (sincronismo)
       const newUser: User = {
         id: `u-${Date.now()}`,
-        nome,
-        email,
+        nome: nome.trim(),
+        email: targetEmail,
         tenantId: tenant.id,
         role,
         cargo,
@@ -152,30 +190,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({
         hasCompletedOnboarding: false,
       };
       
-      // 💾 Salvar usuário no estado e banco
       const updatedUsers = [...allUsers, newUser];
       onUpdateUsers(updatedUsers);
       
-      // 📧 Enviar e-mail de convite
-      // 🔒 HOTFIX: Blindagem definitiva de dados antes de enviar
-      const safeEmail = String(email || '').trim().toLowerCase();
-      const safeName = String(nome || '').trim();
-      
-      if (!safeEmail) {
-        toast.error('❌ E-mail obrigatório para enviar convite.');
-        setInviteLoading(false);
-        return;
-      }
-      
-      if (!safeName) {
-        toast.error('❌ Nome obrigatório para enviar convite.');
-        setInviteLoading(false);
-        return;
-      }
-      
+      // 📧 PRIORIDADE 2: Enviar e-mail APENAS após sucesso no banco
       const emailResult = await emailService.sendInviteEmail({
-        toEmail: safeEmail,
-        toName: safeName,
+        toEmail: targetEmail,
+        toName: nome.trim(),
         inviteToken,
         tenantName: tenant.nome || 'Sistema',
         role,
@@ -188,7 +209,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
         setShowInviteModal(false);
         (e.target as HTMLFormElement).reset();
       } else {
-        toast.error(`❌ Usuário criado, mas erro ao enviar e-mail: ${emailResult.error}`);
+        toast.error(`❌ Convite criado, mas erro ao enviar e-mail: ${emailResult.error}`);
       }
       
     } catch (error: any) {
