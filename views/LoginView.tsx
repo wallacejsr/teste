@@ -42,37 +42,58 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
 
   // 🔑 Detectar token de convite na URL (?invite=xxx)
   useEffect(() => {
+    // 🔒 HOTFIX: Limpeza preventiva de sessão para evitar conflitos
+    const cleanupSession = async () => {
+      try {
+        await authService.logout();
+        console.log('[LoginView] Sessão limpa preventivamente para convite');
+      } catch (error) {
+        console.warn('[LoginView] Erro ao limpar sessão:', error);
+      }
+    };
+
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('invite');
     
-    if (token && allUsers && allUsers.length > 0) {
-      // Buscar usuário pelo token
-      const user = allUsers.find(u => u.inviteToken === token);
+    if (token) {
+      // Limpar sessão antes de processar convite
+      cleanupSession();
       
-      if (user) {
-        // Validar expiração do token
-        const now = new Date();
-        const expiry = user.inviteTokenExpiry ? new Date(user.inviteTokenExpiry) : null;
+      if (allUsers && allUsers.length > 0) {
+        // Buscar usuário pelo token
+        const user = allUsers.find(u => u.inviteToken === token);
         
-        if (expiry && now > expiry) {
-          toast.error('❌ Token de convite expirado. Solicite um novo convite.');
-          return;
+        if (user) {
+          // Validar expiração do token
+          const now = new Date();
+          const expiry = user.inviteTokenExpiry ? new Date(user.inviteTokenExpiry) : null;
+          
+          if (expiry && now > expiry) {
+            toast.error('❌ Este convite expirou. Solicite um novo convite ao administrador.');
+            // Limpar parâmetro da URL
+            window.history.replaceState({}, '', window.location.pathname);
+            return;
+          }
+          
+          if (user.hasCompletedOnboarding) {
+            toast.error('ℹ️ Este convite já foi utilizado. Faça login normalmente.');
+            // Limpar parâmetro da URL
+            window.history.replaceState({}, '', window.location.pathname);
+            return;
+          }
+          
+          // Token válido, mudar para modo invite
+          setInviteToken(token);
+          setInvitedUser(user);
+          setEmail(user.email);
+          setNome(user.nome);
+          setMode('invite');
+          toast.success(`👋 Bem-vindo, ${user.nome}! Configure sua senha para acessar o sistema.`);
+        } else {
+          toast.error('❌ Este convite é inválido ou já foi utilizado. Entre em contato com o administrador.');
+          // Limpar parâmetro da URL
+          window.history.replaceState({}, '', window.location.pathname);
         }
-        
-        if (user.hasCompletedOnboarding) {
-          toast.error('ℹ️ Este convite já foi usado. Faça login normalmente.');
-          return;
-        }
-        
-        // Token válido, mudar para modo invite
-        setInviteToken(token);
-        setInvitedUser(user);
-        setEmail(user.email);
-        setNome(user.nome);
-        setMode('invite');
-        toast.success(`👋 Bem-vindo, ${user.nome}! Configure sua senha para acessar o sistema.`);
-      } else {
-        toast.error('❌ Token de convite inválido.');
       }
     }
   }, [allUsers]);

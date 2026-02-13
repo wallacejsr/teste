@@ -74,6 +74,7 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<{ 
     }
 
     // 🔗 Gerar URL de convite
+    // ✅ HOTFIX: Usar parâmetro 'invite' ao invés de 'token' (padrão do LoginView)
     const inviteUrl = `${window.location.origin}/?invite=${params.inviteToken}`;
     const primaryColor = params.primaryColor || '#3b82f6';
 
