@@ -40,7 +40,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
     }
   }, [imagePreloaded]);
 
-  // 🔑 Detectar token de convite na URL (?invite=xxx)
+  // 🔑 Detectar token de convite na URL (?token=xxx ou ?invite=xxx)
   useEffect(() => {
     // 🔒 HOTFIX: Limpeza preventiva de sessão para evitar conflitos
     const cleanupSession = async () => {
@@ -52,51 +52,80 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
       }
     };
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token') || urlParams.get('invite'); // Compatibilidade retroativa
-    
-    if (token) {
-      // Limpar sessão antes de processar convite
-      cleanupSession();
+    const validateInviteToken = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token') || urlParams.get('invite'); // Compatibilidade retroativa
       
-      if (allUsers && allUsers.length > 0) {
-        // Buscar usuário pelo token
-        const user = allUsers.find(u => u.inviteToken === token);
-        
-        if (user) {
-          // Validar expiração do token
-          const now = new Date();
-          const expiry = user.inviteTokenExpiry ? new Date(user.inviteTokenExpiry) : null;
-          
-          if (expiry && now > expiry) {
-            toast.error('❌ Este convite expirou. Solicite um novo convite ao administrador.');
-            // Limpar parâmetro da URL
-            window.history.replaceState({}, '', window.location.pathname);
-            return;
-          }
-          
-          if (user.hasCompletedOnboarding) {
-            toast.error('ℹ️ Este convite já foi utilizado. Faça login normalmente.');
-            // Limpar parâmetro da URL
-            window.history.replaceState({}, '', window.location.pathname);
-            return;
-          }
-          
-          // Token válido, mudar para modo invite
-          setInviteToken(token);
-          setInvitedUser(user);
-          setEmail(user.email);
-          setNome(user.nome);
-          setMode('invite');
-          toast.success(`👋 Bem-vindo, ${user.nome}! Configure sua senha para acessar o sistema.`);
-        } else {
+      if (!token) return;
+
+      try {
+        // Limpar sessão antes de processar convite
+        await cleanupSession();
+
+        console.log('[LoginView] Validando token no banco:', token);
+
+        // 💾 QUERY DIRETA AO SUPABASE: Buscar convite na tabela user_invites
+        const { data: invite, error } = await dataSyncService.supabase
+          .from('user_invites')
+          .select('*')
+          .eq('token', token)
+          .eq('status', 'pending')
+          .single();
+
+        if (error) {
+          console.error('[LoginView] Erro ao buscar convite:', error);
           toast.error('❌ Este convite é inválido ou já foi utilizado. Entre em contato com o administrador.');
-          // Limpar parâmetro da URL
           window.history.replaceState({}, '', window.location.pathname);
+          return;
         }
+
+        if (!invite) {
+          toast.error('❌ Este convite é inválido ou já foi utilizado.');
+          window.history.replaceState({}, '', window.location.pathname);
+          return;
+        }
+
+        // ✅ Validar expiração do token
+        const now = new Date();
+        const expiry = new Date(invite.expires_at);
+        
+        if (now > expiry) {
+          toast.error('❌ Este convite expirou. Solicite um novo convite ao administrador.');
+          window.history.replaceState({}, '', window.location.pathname);
+          return;
+        }
+
+        // ✅ Token válido - criar objeto de usuário temporário
+        const tempUser: User = {
+          id: `temp-${Date.now()}`,
+          nome: invite.name,
+          email: invite.email,
+          tenantId: invite.tenant_id,
+          role: invite.role as Role,
+          cargo: invite.metadata?.cargo || '',
+          ativo: true,
+          hasCompletedOnboarding: false,
+        };
+
+        console.log('✅ Convite válido encontrado no banco:', invite);
+
+        // Configurar estado para modo invite
+        setInviteToken(token);
+        setInvitedUser(tempUser);
+        setEmail(invite.email);
+        setNome(invite.name);
+        setMode('invite');
+        toast.success(`👋 Bem-vindo, ${invite.name}! Configure sua senha para acessar o sistema.`);
+
+      } catch (error: any) {
+        console.error('[LoginView] Erro ao validar token:', error);
+        toast.error('❌ Erro ao validar convite. Tente novamente.');
+        window.history.replaceState({}, '', window.location.pathname);
       }
-    }
-  }, [allUsers]);
+    };
+
+    validateInviteToken();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -265,6 +294,22 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, globalConfig, imagePrelo
 
         // Persistir no banco
         await dataSyncService.syncUsers(updatedUsers, invitedUser.tenantId);
+      }
+
+      // 💾 ATUALIZAR STATUS DO CONVITE PARA 'ACCEPTED' NO BANCO
+      const { error: updateError } = await dataSyncService.supabase
+        .from('user_invites')
+        .update({
+          status: 'accepted',
+          user_id: updatedUser.id,
+          accepted_at: new Date().toISOString()
+        })
+        .eq('token', inviteToken);
+
+      if (updateError) {
+        console.warn('[LoginView] Erro ao atualizar status do convite:', updateError);
+      } else {
+        console.log('✅ Convite marcado como accepted no banco');
       }
 
       toast.success('✅ Senha configurada com sucesso! Você será redirecionado...');
