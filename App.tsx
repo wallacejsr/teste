@@ -1021,6 +1021,67 @@ const App: React.FC = () => {
             setTasks(newTasks); 
             syncTasksWithSupabase(sanitized);
           }} 
+          onRemoveTask={async (taskId) => {
+            const task = tasks.find(t => t.id === taskId);
+            const taskName = task?.nome || 'tarefa';
+            const taskWBS = task?.wbs || 'N/A';
+            
+            // Verificar dependências
+            const hasDependencies = tasks.some(t => 
+              t.dependencias && t.dependencias.includes(taskId)
+            );
+            
+            const details = [
+              `WBS: ${taskWBS}`,
+              `Nome: ${taskName}`,
+              'A tarefa será removida permanentemente do banco de dados',
+            ];
+            
+            if (hasDependencies) {
+              details.push('⚠️ Outras tarefas dependem desta - serão desvinculadas');
+            }
+            
+            const confirmed = await confirmation.confirm({
+              title: 'Excluir Tarefa',
+              message: `Tem certeza que deseja excluir "${taskName}"?`,
+              details,
+              type: 'danger',
+              confirmText: 'Sim, excluir tarefa',
+              cancelText: 'Cancelar'
+            });
+
+            if (!confirmed) return;
+
+            const loadingToast = toast.loading('Excluindo tarefa do banco...');
+
+            try {
+              // 1. Excluir do Supabase
+              await dataSyncService.deleteTask(taskId, currentUser.tenantId);
+              
+              // 2. Remover do estado local
+              setTasks(prev => prev.filter(t => t.id !== taskId));
+              
+              // 3. Limpar dependências em outras tarefas
+              setTasks(prev => prev.map(t => {
+                if (t.dependencias && t.dependencias.includes(taskId)) {
+                  return {
+                    ...t,
+                    dependencias: t.dependencias.filter(depId => depId !== taskId)
+                  };
+                }
+                return t;
+              }));
+              
+              toast.dismiss(loadingToast);
+              toast.success(`✅ ${taskName} excluído com sucesso!`);
+            } catch (error) {
+              console.error('❌ Erro ao excluir tarefa:', error);
+              toast.dismiss(loadingToast);
+              toast.error('❌ Erro ao excluir tarefa', {
+                description: error instanceof Error ? error.message : 'Tente novamente.'
+              });
+            }
+          }}
           dailyLogs={tenantLogs}
           setActiveTab={setActiveTab}
         /> 
@@ -1038,6 +1099,67 @@ const App: React.FC = () => {
             const newTasks = [...otherTenantsTasks, ...sanitized];
             setTasks(newTasks); 
             syncTasksWithSupabase(sanitized);
+          }}
+          onRemoveTask={async (taskId) => {
+            const task = tasks.find(t => t.id === taskId);
+            const taskName = task?.nome || 'tarefa';
+            const taskWBS = task?.wbs || 'N/A';
+            
+            // Verificar dependências
+            const hasDependencies = tasks.some(t => 
+              t.dependencias && t.dependencias.includes(taskId)
+            );
+            
+            const details = [
+              `WBS: ${taskWBS}`,
+              `Nome: ${taskName}`,
+              'A tarefa será removida permanentemente do banco de dados',
+            ];
+            
+            if (hasDependencies) {
+              details.push('⚠️ Outras tarefas dependem desta - serão desvinculadas');
+            }
+            
+            const confirmed = await confirmation.confirm({
+              title: 'Excluir Tarefa',
+              message: `Tem certeza que deseja excluir "${taskName}"?`,
+              details,
+              type: 'danger',
+              confirmText: 'Sim, excluir tarefa',
+              cancelText: 'Cancelar'
+            });
+
+            if (!confirmed) return;
+
+            const loadingToast = toast.loading('Excluindo tarefa do banco...');
+
+            try {
+              // 1. Excluir do Supabase
+              await dataSyncService.deleteTask(taskId, currentUser.tenantId);
+              
+              // 2. Remover do estado local
+              setTasks(prev => prev.filter(t => t.id !== taskId));
+              
+              // 3. Limpar dependências em outras tarefas
+              setTasks(prev => prev.map(t => {
+                if (t.dependencias && t.dependencias.includes(taskId)) {
+                  return {
+                    ...t,
+                    dependencias: t.dependencias.filter(depId => depId !== taskId)
+                  };
+                }
+                return t;
+              }));
+              
+              toast.dismiss(loadingToast);
+              toast.success(`✅ ${taskName} excluído com sucesso!`);
+            } catch (error) {
+              console.error('❌ Erro ao excluir tarefa:', error);
+              toast.dismiss(loadingToast);
+              toast.error('❌ Erro ao excluir tarefa', {
+                description: error instanceof Error ? error.message : 'Tente novamente.'
+              });
+            }
           }}
           setActiveTab={setActiveTab}
           selectedProjectId={selectedProject?.id || ''}

@@ -47,6 +47,7 @@ interface PlanejamentoViewProps {
   resources: Resource[];
   dailyLogs: DailyLog[];
   onTasksChange: (tasks: Task[]) => void;
+  onRemoveTask?: (taskId: string) => Promise<void>;
   setActiveTab?: (tab: string) => void;
 }
 
@@ -243,6 +244,7 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
   resources, 
   dailyLogs, 
   onTasksChange,
+  onRemoveTask,
   setActiveTab
 }) => {
   const [showModal, setShowModal] = useState(false);
@@ -713,9 +715,15 @@ const PlanejamentoView: React.FC<PlanejamentoViewProps> = ({
     setActiveActionMenuId(null);
   };
 
-  const handleDeleteTask = (task: Task) => {
-    if (window.confirm(`Deseja excluir "${task.nome}"?`)) {
-      onTasksChange(redistributeWeights(tasks.filter(t => t.id !== task.id && !t.wbs.startsWith(`${task.wbs}.`)), project.id));
+  const handleDeleteTask = async (task: Task) => {
+    // Se onRemoveTask foi fornecido (via App.tsx), usar modal personalizado
+    if (onRemoveTask) {
+      await onRemoveTask(task.id);
+    } else {
+      // Fallback: usar confirm padrão (caso seja usado em outro contexto)
+      if (window.confirm(`Deseja excluir "${task.nome}"?`)) {
+        onTasksChange(redistributeWeights(tasks.filter(t => t.id !== task.id && !t.wbs.startsWith(`${task.wbs}.`)), project.id));
+      }
     }
     setActiveActionMenuId(null);
   };

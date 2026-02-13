@@ -32,6 +32,7 @@ interface GanttChartViewProps {
   dailyLogs: DailyLog[];
   tenant: Tenant;
   onTasksChange: (tasks: Task[]) => void;
+  onRemoveTask?: (taskId: string) => Promise<void>;
   setActiveTab?: (tab: string) => void;
   selectedProjectId?: string;
 }
@@ -53,6 +54,7 @@ const GanttChartView: React.FC<GanttChartViewProps> = ({
   dailyLogs,
   tenant,
   onTasksChange,
+  onRemoveTask,
   setActiveTab,
   selectedProjectId: selectedProjectIdProp,
 }) => {
